@@ -9,19 +9,11 @@ public class RubyMarshalWriter
 {
     private readonly BinaryWriter _writer;
     private readonly Dictionary<string, int> _symbolTable = new Dictionary<string, int>();
-    // CRÍTICO: El caché de objetos para no duplicar memoria y evitar recursividad infinita
     private readonly Dictionary<object, int> _objectCache = new Dictionary<object, int>(ReferenceEqualityComparer.Instance);
 
-    public RubyMarshalWriter(Stream stream)
-    {
-        _writer = new BinaryWriter(stream);
-    }
+    public RubyMarshalWriter(Stream stream) { _writer = new BinaryWriter(stream); }
 
-    public void WriteHeader()
-    {
-        _writer.Write((byte)4);
-        _writer.Write((byte)8);
-    }
+    public void WriteHeader() { _writer.Write((byte)4); _writer.Write((byte)8); }
 
     public void WriteValue(object? value)
     {
@@ -30,7 +22,19 @@ public class RubyMarshalWriter
         if (value is int i) { _writer.Write((byte)'i'); WriteFixnum(i); return; }
         if (value is RubySymbol sym) { WriteSymbol(sym.Name); return; }
 
-        // Si el objeto ya se escribió antes, escribimos un enlace '@'
+        if (value is RubyWrapper rw)
+        {
+            _writer.Write((byte)'I');
+            WriteValue(rw.WrappedObject);
+            WriteFixnum(rw.InstanceVariables.Count);
+            foreach (var kvp in rw.InstanceVariables)
+            {
+                WriteValue(kvp.Key);
+                WriteValue(kvp.Value);
+            }
+            return;
+        }
+
         if (_objectCache.TryGetValue(value, out int index))
         {
             _writer.Write((byte)'@');
@@ -38,47 +42,27 @@ public class RubyMarshalWriter
             return;
         }
 
-        // Si es nuevo, lo registramos en el caché
         _objectCache[value] = _objectCache.Count;
 
-        if (value is string s)
-        {
-            _writer.Write((byte)'"');
-            WriteStringBytes(Encoding.UTF8.GetBytes(s));
-        }
-        else if (value is double d)
-        {
-            _writer.Write((byte)'f');
-            string fs = d.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            WriteStringBytes(Encoding.UTF8.GetBytes(fs));
-        }
+        if (value is string s) { _writer.Write((byte)'"'); WriteStringBytes(Encoding.UTF8.GetBytes(s)); }
+        else if (value is double d) { _writer.Write((byte)'f'); WriteStringBytes(Encoding.UTF8.GetBytes(d.ToString(System.Globalization.CultureInfo.InvariantCulture))); }
         else if (value is long l)
         {
             _writer.Write((byte)'l');
-            char sign = l < 0 ? '-' : '+';
-            _writer.Write((byte)sign);
+            _writer.Write((byte)(l < 0 ? '-' : '+'));
             long absL = Math.Abs(l);
             var words = new List<ushort>();
-            while (absL > 0)
-            {
-                words.Add((ushort)(absL & 0xFFFF));
-                absL >>= 16;
-            }
+            while (absL > 0) { words.Add((ushort)(absL & 0xFFFF)); absL >>= 16; }
             WriteFixnum(words.Count);
             foreach (var word in words) _writer.Write(BitConverter.GetBytes(word));
         }
         else if (value is System.Numerics.BigInteger bi)
         {
             _writer.Write((byte)'l');
-            char sign = bi.Sign < 0 ? '-' : '+';
-            _writer.Write((byte)sign);
+            _writer.Write((byte)(bi.Sign < 0 ? '-' : '+'));
             System.Numerics.BigInteger absL = System.Numerics.BigInteger.Abs(bi);
             var words = new List<ushort>();
-            while (absL > 0)
-            {
-                words.Add((ushort)(absL & 0xFFFF));
-                absL >>= 16;
-            }
+            while (absL > 0) { words.Add((ushort)(absL & 0xFFFF)); absL >>= 16; }
             WriteFixnum(words.Count);
             foreach (var word in words) _writer.Write(BitConverter.GetBytes(word));
         }
@@ -92,14 +76,7 @@ public class RubyMarshalWriter
         {
             _writer.Write((byte)(rh.HasDefault ? '}' : '{'));
             WriteFixnum(rh.Count);
-            
-            // CORRECCIÓN: Iterar usando var (se resuelve como KeyValuePair<object, object>)
-            foreach (var kvp in rh) 
-            { 
-                WriteValue(kvp.Key); 
-                WriteValue(kvp.Value); 
-            }
-            
+            foreach (var kvp in rh) { WriteValue(kvp.Key); WriteValue(kvp.Value); }
             if (rh.HasDefault) WriteValue(rh.DefaultValue);
         }
         else if (value is IDictionary dict)
@@ -108,24 +85,9 @@ public class RubyMarshalWriter
             WriteFixnum(dict.Count);
             foreach (DictionaryEntry kvp in dict) { WriteValue(kvp.Key); WriteValue(kvp.Value); }
         }
-        else if (value is RubyUserDefined rud)
-        {
-            _writer.Write((byte)'u');
-            WriteSymbol(rud.ClassName);
-            WriteStringBytes(rud.Data);
-        }
-        else if (value is RubyClass rc)
-        {
-            _writer.Write((byte)'c');
-            byte[] bytes = Encoding.UTF8.GetBytes(rc.Name);
-            WriteStringBytes(bytes);
-        }
-        else if (value is RubyModule rm)
-        {
-            _writer.Write((byte)'m');
-            byte[] bytes = Encoding.UTF8.GetBytes(rm.Name);
-            WriteStringBytes(bytes);
-        }
+        else if (value is RubyUserDefined rud) { _writer.Write((byte)'u'); WriteSymbol(rud.ClassName); WriteStringBytes(rud.Data); }
+        else if (value is RubyClass rc) { _writer.Write((byte)'c'); WriteStringBytes(Encoding.UTF8.GetBytes(rc.Name)); }
+        else if (value is RubyModule rm) { _writer.Write((byte)'m'); WriteStringBytes(Encoding.UTF8.GetBytes(rm.Name)); }
         else if (value is RubyObject ro)
         {
             _writer.Write((byte)'o');
@@ -133,53 +95,36 @@ public class RubyMarshalWriter
             WriteFixnum(ro.Attributes.Count);
             foreach (var kvp in ro.Attributes)
             {
-                string attrName = kvp.Key;
-                if (!attrName.StartsWith("@")) attrName = "@" + attrName;
+                string attrName = kvp.Key.StartsWith("@") ? kvp.Key : "@" + kvp.Key;
                 WriteSymbol(attrName);
                 WriteValue(kvp.Value);
             }
         }
-        else
-        {
-            throw new NotSupportedException($"Tipo de dato no soportado en Marshal: {value.GetType()}");
-        }
+        else throw new NotSupportedException($"Tipo no soportado: {value.GetType()}");
     }
 
     private void WriteSymbol(string name)
     {
-        if (_symbolTable.TryGetValue(name, out int index))
-        {
-            _writer.Write((byte)';');
-            WriteFixnum(index);
-        }
-        else
-        {
-            _writer.Write((byte)':');
-            byte[] bytes = Encoding.UTF8.GetBytes(name);
-            WriteStringBytes(bytes);
-            _symbolTable[name] = _symbolTable.Count;
-        }
+        if (_symbolTable.TryGetValue(name, out int index)) { _writer.Write((byte)';'); WriteFixnum(index); }
+        else { _writer.Write((byte)':'); WriteStringBytes(Encoding.UTF8.GetBytes(name)); _symbolTable[name] = _symbolTable.Count; }
     }
 
     private void WriteFixnum(int value)
     {
         if (value == 0) { _writer.Write((byte)0); return; }
         if (value > 0 && value < 123) { _writer.Write((byte)(value + 5)); return; }
-        if (value < -4 && value > -124) { _writer.Write((byte)(value - 5)); return; }
-
+        // CORRECCIÓN: Arreglado el límite de bytes negativos
+        if (value < 0 && value > -124) { _writer.Write((byte)(value - 5)); return; }
+        
         byte[] bytes = BitConverter.GetBytes(value);
         int len = 4;
         while (len > 1 && bytes[len - 1] == (value < 0 ? 0xFF : 0x00)) len--;
-
+        
         if (value < 0) _writer.Write((sbyte)(-len));
         else _writer.Write((byte)len);
 
         for (int i = 0; i < len; i++) _writer.Write(bytes[i]);
     }
 
-    private void WriteStringBytes(byte[] bytes)
-    {
-        WriteFixnum(bytes.Length);
-        _writer.Write(bytes);
-    }
+    private void WriteStringBytes(byte[] bytes) { WriteFixnum(bytes.Length); _writer.Write(bytes); }
 }
