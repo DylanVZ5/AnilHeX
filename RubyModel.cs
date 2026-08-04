@@ -46,3 +46,45 @@ public class RubySymbol
 
     public override string ToString() => Name;
 }
+
+// =========================================================
+// NUEVAS CLASES NECESARIAS PARA EL LECTOR Y ESCRITOR
+// =========================================================
+
+public class RubyUserDefined
+{
+    public string ClassName { get; set; }
+    public byte[] Data { get; set; }
+
+    public RubyUserDefined(string className, byte[] data) 
+    { 
+        ClassName = className; 
+        Data = data; 
+    }
+}
+
+public class RubyClass
+{
+    public string Name { get; set; }
+
+    public RubyClass(string name) 
+    { 
+        Name = name; 
+    }
+}
+
+public class RubyModule
+{
+    public string Name { get; set; }
+
+    public RubyModule(string name) 
+    { 
+        Name = name; 
+    }
+}
+
+public class RubyHash : Dictionary<object, object>
+{
+    public object DefaultValue { get; set; }
+    public bool HasDefault { get; set; }
+}

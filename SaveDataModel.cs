@@ -2,6 +2,9 @@ using System.Collections.Generic;
 
 public class SaveDataModel
 {
+    // Almacena la estructura binaria original para poder reescribirla
+    public object RootData { get; set; } 
+
     public List<Pokemon> Party { get; set; } = new List<Pokemon>();
     public List<PCBox> Boxes { get; set; } = new List<PCBox>();
 }

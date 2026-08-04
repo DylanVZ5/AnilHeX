@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -7,6 +8,7 @@ public class RubyMarshalReader
 {
     private readonly BinaryReader _reader;
     private readonly List<string> _symbolTable = new List<string>();
+    private readonly List<object> _objectCache = new List<object>(); 
 
     public RubyMarshalReader(Stream stream)
     {
@@ -20,18 +22,15 @@ public class RubyMarshalReader
         }
     }
 
-   public object? ReadValue()
+    public object? ReadValue()
     {
         long pos = _reader.BaseStream.Position;
         byte type = _reader.ReadByte();
 
-        // Depuración opcional para ver el flujo paso a paso si lo necesitas:
-        // Console.WriteLine($"0x{pos:X8} -> '{(type >= 32 && type < 127 ? (char)type : '.')}' (0x{type:X2})");
-
         switch ((char)type)
         {
             case '0': // nil
-            case 'n': // nil alternativo (0x6E)
+            case 'n': // nil alternativo
                 return null;
             case 'T': // true
                 return true;
@@ -54,27 +53,36 @@ public class RubyMarshalReader
                 }
                 if (sign == '-') bigInt = -bigInt;
 
-                if (bigInt >= long.MinValue && bigInt <= long.MaxValue)
-                    return (long)bigInt;
-                return bigInt;
+                object bignumResult = (bigInt >= long.MinValue && bigInt <= long.MaxValue) ? (long)bigInt : bigInt;
+                _objectCache.Add(bignumResult);
+                return bignumResult;
+
             case '"': // String
-                return Encoding.UTF8.GetString(ReadStringBytes());
+                string str = Encoding.UTF8.GetString(ReadStringBytes());
+                _objectCache.Add(str);
+                return str;
+
             case ':': // Symbol
                 return ReadSymbol();
+
             case ';': // Symbol reference
                 int symIndex = ReadFixnum();
                 if (_symbolTable != null && symIndex >= 0 && symIndex < _symbolTable.Count)
                     return new RubySymbol(_symbolTable[symIndex]);
                 return new RubySymbol($"symbol_{symIndex}");
+
             case '[': // Array
                 int count = ReadFixnum();
                 var list = new List<object?>();
+                _objectCache.Add(list); 
                 for (int i = 0; i < count; i++)
                     list.Add(ReadValue());
                 return list;
-            case '{': // Hash
+
+            case '{': // Hash normal
                 int hashCount = ReadFixnum();
                 var dict = new Dictionary<object, object?>();
+                _objectCache.Add(dict); 
                 for (int i = 0; i < hashCount; i++)
                 {
                     var key = ReadValue() ?? "null_key";
@@ -82,32 +90,81 @@ public class RubyMarshalReader
                     dict[key] = val;
                 }
                 return dict;
+
+            case '}': // Hash con valor por defecto (NUEVO)
+                int hashDefCount = ReadFixnum();
+                var dictDef = new Dictionary<object, object?>();
+                _objectCache.Add(dictDef); 
+                for (int i = 0; i < hashDefCount; i++)
+                {
+                    var key = ReadValue() ?? "null_key";
+                    var val = ReadValue();
+                    dictDef[key] = val;
+                }
+                var defaultVal = ReadValue(); // Ruby Marshal añade el valor por defecto al final
+                // Si en el futuro necesitas usar este defaultVal, puedes crear una clase personalizada.
+                // Por ahora, lo leemos para mantener la sincronización.
+                return dictDef;
+
             case 'o': // Ruby Object
-                string className = ReadSymbol().Name;
+                object? classObj = ReadValue();
+                string className = classObj is RubySymbol rs ? rs.Name : classObj?.ToString() ?? "Unknown";
                 var obj = new RubyObject(className);
+                _objectCache.Add(obj); 
+
                 int attrCount = ReadFixnum();
                 for (int i = 0; i < attrCount; i++)
                 {
-                    RubySymbol attrSym = ReadSymbol();
+                    object? attrSymObj = ReadValue(); 
                     object? attrVal = ReadValue();
-                    obj.Set(attrSym.Name, attrVal);
+                    string attrName = attrSymObj is RubySymbol s ? s.Name : attrSymObj?.ToString() ?? "Unknown";
+                    obj.Set(attrName, attrVal);
                 }
                 return obj;
-            case 'I': // IVAR
+
+            case 'I': // IVAR (Objetos envueltos)
                 var wrappedVal = ReadValue();
                 int ivarCount = ReadFixnum();
                 for (int i = 0; i < ivarCount; i++)
                 {
-                    ReadSymbol(); 
-                    ReadValue();  
+                    ReadValue(); // Nombre de la variable (Symbol)
+                    ReadValue(); // Valor de la variable
                 }
                 return wrappedVal;
+
+            case '@': // Enlace de Objeto (Object Link)
+                int objIndex = ReadFixnum();
+                return _objectCache[objIndex];
+
+            case 'u': // User Defined (Color, Tone, Table)
+                object? uClassObj = ReadValue();
+                string uClassName = uClassObj is RubySymbol urs ? urs.Name : uClassObj?.ToString() ?? "Unknown";
+                byte[] uData = ReadStringBytes();
+                var uObj = new RubyObject(uClassName); 
+                _objectCache.Add(uObj);
+                return uObj;
+
+            case 'c': // Class (NUEVO)
+            case 'm': // Module (NUEVO)
+                int cmLen = ReadFixnum();
+                string cmName = Encoding.UTF8.GetString(_reader.ReadBytes(cmLen));
+                var cmObj = new RubyObject(cmName);
+                _objectCache.Add(cmObj);
+                return cmObj;
+
+            case 'f': // Float
+                string floatStr = Encoding.UTF8.GetString(ReadStringBytes());
+                double fVal = double.Parse(floatStr, System.Globalization.CultureInfo.InvariantCulture);
+                _objectCache.Add(fVal);
+                return fVal;
+
             default:
                 throw new NotSupportedException(
                     $"Tipo no soportado o desincronización en offset 0x{pos:X}: '{(char)type}' (0x{type:X2}). Stream Position = 0x{_reader.BaseStream.Position:X}"
                 );
         }
     }
+
     private RubySymbol ReadSymbol()
     {
         byte[] bytes = ReadStringBytes();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -6,6 +7,7 @@ using System.IO.Compression;
 public class SaveParser
 {
     private string _savePath;
+    private PBSReader _pbs;
 
     private static readonly string[] StandardNatures = new string[]
     {
@@ -16,7 +18,11 @@ public class SaveParser
         "CALM", "GENTLE", "SASSY", "CAREFUL", "QUIRKY"
     };
 
-    public SaveParser(string path) => _savePath = path;
+    public SaveParser(string path, PBSReader pbs = null)
+    {
+        _savePath = path;
+        _pbs = pbs;
+    }
 
     public SaveDataModel ParseSave()
     {
@@ -31,17 +37,13 @@ public class SaveParser
 
         try
         {
-            // 1. Si el archivo empieza con la cabecera nativa de Ruby Marshal (\x04\x08), no está comprimido
             if (fileBytes[0] == 0x04 && fileBytes[1] == 0x08)
             {
                 decompressedStream = new MemoryStream(fileBytes);
             }
             else
             {
-                // 2. Si está comprimido, intentamos descomprimirlo con los diferentes métodos posibles de Zlib/Deflate
                 bool success = false;
-
-                // Intento A: ZLibStream nativo de .NET 8
                 try
                 {
                     using (var sourceStream = new MemoryStream(fileBytes))
@@ -56,7 +58,6 @@ public class SaveParser
                 }
                 catch { }
 
-                // Intento B: DeflateStream omitiendo los primeros 2 bytes de cabecera
                 if (!success)
                 {
                     try
@@ -74,7 +75,6 @@ public class SaveParser
                     catch { }
                 }
 
-                // Intento C: DeflateStream puro desde el byte 0
                 if (!success)
                 {
                     using (var sourceStream = new MemoryStream(fileBytes))
@@ -93,12 +93,14 @@ public class SaveParser
                 RubyMarshalReader reader = new RubyMarshalReader(decompressedStream);
                 object rootData = reader.ReadValue();
 
-                // Extraer Equipo ($Trainer / :player)
+                // ASIGNACIÓN CRÍTICA PARA EL SAVEWRITER
+                model.RootData = rootData;
+
                 RubyObject trainerObj = FindObjectByClass(rootData, "PokeBattle_Trainer") 
                                        ?? FindObjectByClass(rootData, "Player")
                                        ?? FindObjectWithAttribute(rootData, "@party");
 
-                if (trainerObj != null && trainerObj.Get("@party") is List<object> partyList)
+                if (trainerObj != null && trainerObj.Get("@party") is IList partyList)
                 {
                     foreach (var pokeObj in partyList)
                     {
@@ -107,11 +109,10 @@ public class SaveParser
                     }
                 }
 
-                // Extraer Cajas del PC ($PokemonStorage / :storage)
                 RubyObject storageObj = FindObjectByClass(rootData, "PokemonStorage") 
                                       ?? FindObjectWithAttribute(rootData, "@boxes");
 
-                if (storageObj != null && storageObj.Get("@boxes") is List<object> boxesList)
+                if (storageObj != null && storageObj.Get("@boxes") is IList boxesList)
                 {
                     for (int b = 0; b < boxesList.Count; b++)
                     {
@@ -124,7 +125,7 @@ public class SaveParser
                             };
 
                             var pokesInBox = boxRo.Get("@pokemon") ?? boxRo.Get("@pokemons");
-                            if (pokesInBox is List<object> slotList)
+                            if (pokesInBox is IList slotList)
                             {
                                 for (int s = 0; s < slotList.Count && s < 30; s++)
                                 {
@@ -143,7 +144,6 @@ public class SaveParser
         }
         finally
         {
-            // Si creamos un MemoryStream independiente para la descompresión, lo liberamos al terminar
             if (decompressedStream != memStream)
             {
                 memStream?.Dispose();
@@ -170,7 +170,7 @@ public class SaveParser
                 if (found != null) return found;
             }
         }
-        else if (node is List<object> list)
+        else if (node is IList list)
         {
             foreach (var item in list)
             {
@@ -178,7 +178,7 @@ public class SaveParser
                 if (found != null) return found;
             }
         }
-        else if (node is Dictionary<object, object> dict)
+        else if (node is IDictionary dict)
         {
             foreach (var entry in dict.Values)
             {
@@ -205,7 +205,7 @@ public class SaveParser
                 if (found != null) return found;
             }
         }
-        else if (node is List<object> list)
+        else if (node is IList list)
         {
             foreach (var item in list)
             {
@@ -220,7 +220,9 @@ public class SaveParser
     {
         Pokemon p = new Pokemon();
 
-        p.Species = ro.Get("@species")?.ToString() ?? "Desconocido";
+        string speciesRaw = ro.Get("@species")?.ToString() ?? "Desconocido";
+        p.Species = _pbs != null ? _pbs.GetName(_pbs.Species, speciesRaw, speciesRaw) : speciesRaw;
+        
         p.Nickname = ro.Get("@name")?.ToString() ?? p.Species;
         p.Level = Convert.ToInt32(ro.Get("@level") ?? 1);
 
@@ -229,25 +231,31 @@ public class SaveParser
 
         p.IsShiny = Convert.ToBoolean(ro.Get("@shiny") ?? false);
         p.Form = Convert.ToInt32(ro.Get("@form") ?? 0);
-        p.Ability = ro.Get("@ability")?.ToString() ?? "Desconocida";
+        
+        string abilityRaw = ro.Get("@ability")?.ToString() ?? "Desconocida";
+        p.Ability = _pbs != null ? _pbs.GetName(_pbs.Abilities, abilityRaw, abilityRaw) : abilityRaw;
+        
         p.Nature = GetPokemonNature(ro);
 
-        p.HeldItem = ro.Get("@item")?.ToString() ?? "Ninguno";
+        string itemRaw = ro.Get("@item")?.ToString() ?? "Ninguno";
+        p.HeldItem = _pbs != null ? _pbs.GetName(_pbs.Items, itemRaw, itemRaw) : itemRaw;
+        
         p.Happiness = Convert.ToInt32(ro.Get("@happiness") ?? 0);
         p.PokeBall = ro.Get("@poke_ball")?.ToString() ?? "Pokéball";
 
         ExtractStatsData(ro.Get("@iv") ?? ro.Get("@ivs"), p.IVs);
         ExtractStatsData(ro.Get("@ev") ?? ro.Get("@evs"), p.EVs);
 
-        if (ro.Get("@moves") is List<object> moveList)
+        if (ro.Get("@moves") is IList moveList)
         {
             foreach (var mObj in moveList)
             {
                 if (mObj is RubyObject mRo)
                 {
+                    string moveRaw = mRo.Get("@id")?.ToString() ?? "Vacío";
                     p.Moves.Add(new PokemonMove
                     {
-                        Name = mRo.Get("@id")?.ToString() ?? "Vacío",
+                        Name = _pbs != null ? _pbs.GetName(_pbs.Moves, moveRaw, moveRaw) : moveRaw,
                         PP = Convert.ToInt32(mRo.Get("@pp") ?? 0),
                         PPUp = Convert.ToInt32(mRo.Get("@ppup") ?? 0)
                     });
@@ -267,6 +275,12 @@ public class SaveParser
         if (rawNature != null)
         {
             string strNat = rawNature.ToString().Replace(":", "").Replace("@", "").Trim();
+            
+            if (_pbs != null && !int.TryParse(strNat, out _))
+            {
+                return _pbs.GetName(_pbs.Natures, strNat, strNat);
+            }
+
             if (int.TryParse(strNat, out int idx) && idx >= 0 && idx < StandardNatures.Length)
                 return StandardNatures[idx];
 
@@ -289,7 +303,7 @@ public class SaveParser
     {
         if (rawData == null) return;
 
-        if (rawData is List<object> list && list.Count >= 6)
+        if (rawData is IList list && list.Count >= 6)
         {
             targetArray[0] = Convert.ToInt32(list[0] ?? 0);
             targetArray[1] = Convert.ToInt32(list[1] ?? 0);
@@ -298,9 +312,9 @@ public class SaveParser
             targetArray[4] = Convert.ToInt32(list[5] ?? 0);
             targetArray[5] = Convert.ToInt32(list[3] ?? 0);
         }
-        else if (rawData is Dictionary<object, object> dict)
+        else if (rawData is IDictionary dict)
         {
-            foreach (var kvp in dict)
+            foreach (DictionaryEntry kvp in dict)
             {
                 string rawKey = kvp.Key?.ToString()?.ToUpper()?.Replace(":", "")?.Replace("@", "")?.Trim() ?? "";
                 int val = Convert.ToInt32(kvp.Value ?? 0);
