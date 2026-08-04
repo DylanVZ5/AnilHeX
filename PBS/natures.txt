@@ -1,0 +1,74 @@
+[HARDY]
+Name = Fuerte
+
+[LONELY]
+Name = Huraña
+
+[BRAVE]
+Name = Audaz
+
+[ADAMANT]
+Name = Firme
+
+[NAUGHTY]
+Name = Pícara
+
+[BOLD]
+Name = Osada
+
+[DOCILE]
+Name = Dócil
+
+[RELAXED]
+Name = Plácida
+
+[IMPISH]
+Name = Agitada
+
+[LAX]
+Name = Floja
+
+[TIMID]
+Name = Miedosa
+
+[HASTY]
+Name = Activa
+
+[SERIOUS]
+Name = Seria
+
+[JOLLY]
+Name = Alegre
+
+[NAIVE]
+Name = Ingenua
+
+[MODEST]
+Name = Modesta
+
+[MILD]
+Name = Afable
+
+[QUIET]
+Name = Mansa
+
+[BASHFUL]
+Name = Tímida
+
+[RASH]
+Name = Alocada
+
+[CALM]
+Name = Calma
+
+[GENTLE]
+Name = Amable
+
+[SASSY]
+Name = Grosera
+
+[CAREFUL]
+Name = Cauta
+
+[QUIRKY]
+Name = Rara

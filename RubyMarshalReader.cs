@@ -1,0 +1,154 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+
+public class RubyMarshalReader
+{
+    private readonly BinaryReader _reader;
+    private readonly List<string> _symbolTable = new List<string>();
+
+    public RubyMarshalReader(Stream stream)
+    {
+        _reader = new BinaryReader(stream);
+        byte major = _reader.ReadByte();
+        byte minor = _reader.ReadByte();
+
+        if (major != 4 || minor != 8)
+        {
+            throw new InvalidDataException($"Versión de Ruby Marshal no soportada: {major}.{minor}");
+        }
+    }
+
+   public object? ReadValue()
+    {
+        long pos = _reader.BaseStream.Position;
+        byte type = _reader.ReadByte();
+
+        // Depuración opcional para ver el flujo paso a paso si lo necesitas:
+        // Console.WriteLine($"0x{pos:X8} -> '{(type >= 32 && type < 127 ? (char)type : '.')}' (0x{type:X2})");
+
+        switch ((char)type)
+        {
+            case '0': // nil
+            case 'n': // nil alternativo (0x6E)
+                return null;
+            case 'T': // true
+                return true;
+            case 'F': // false
+                return false;
+            case 'i': // Fixnum
+                return ReadFixnum();
+            case 'l': // Bignum
+                char sign = (char)_reader.ReadByte();
+                int shortsCount = ReadFixnum();
+                byte[] bignumBytes = _reader.ReadBytes(shortsCount * 2);
+                
+                System.Numerics.BigInteger bigInt = 0;
+                System.Numerics.BigInteger multiplier = 1;
+                for (int b = 0; b < bignumBytes.Length; b += 2)
+                {
+                    ushort word = BitConverter.ToUInt16(bignumBytes, b);
+                    bigInt += word * multiplier;
+                    multiplier *= 65536;
+                }
+                if (sign == '-') bigInt = -bigInt;
+
+                if (bigInt >= long.MinValue && bigInt <= long.MaxValue)
+                    return (long)bigInt;
+                return bigInt;
+            case '"': // String
+                return Encoding.UTF8.GetString(ReadStringBytes());
+            case ':': // Symbol
+                return ReadSymbol();
+            case ';': // Symbol reference
+                int symIndex = ReadFixnum();
+                if (_symbolTable != null && symIndex >= 0 && symIndex < _symbolTable.Count)
+                    return new RubySymbol(_symbolTable[symIndex]);
+                return new RubySymbol($"symbol_{symIndex}");
+            case '[': // Array
+                int count = ReadFixnum();
+                var list = new List<object?>();
+                for (int i = 0; i < count; i++)
+                    list.Add(ReadValue());
+                return list;
+            case '{': // Hash
+                int hashCount = ReadFixnum();
+                var dict = new Dictionary<object, object?>();
+                for (int i = 0; i < hashCount; i++)
+                {
+                    var key = ReadValue() ?? "null_key";
+                    var val = ReadValue();
+                    dict[key] = val;
+                }
+                return dict;
+            case 'o': // Ruby Object
+                string className = ReadSymbol().Name;
+                var obj = new RubyObject(className);
+                int attrCount = ReadFixnum();
+                for (int i = 0; i < attrCount; i++)
+                {
+                    RubySymbol attrSym = ReadSymbol();
+                    object? attrVal = ReadValue();
+                    obj.Set(attrSym.Name, attrVal);
+                }
+                return obj;
+            case 'I': // IVAR
+                var wrappedVal = ReadValue();
+                int ivarCount = ReadFixnum();
+                for (int i = 0; i < ivarCount; i++)
+                {
+                    ReadSymbol(); 
+                    ReadValue();  
+                }
+                return wrappedVal;
+            default:
+                throw new NotSupportedException(
+                    $"Tipo no soportado o desincronización en offset 0x{pos:X}: '{(char)type}' (0x{type:X2}). Stream Position = 0x{_reader.BaseStream.Position:X}"
+                );
+        }
+    }
+    private RubySymbol ReadSymbol()
+    {
+        byte[] bytes = ReadStringBytes();
+        string name = Encoding.UTF8.GetString(bytes);
+        _symbolTable.Add(name);
+        return new RubySymbol(name);
+    }
+
+    private int ReadFixnum()
+    {
+        sbyte b = _reader.ReadSByte();
+        if (b == 0) return 0;
+        if (b > 4) return b - 5;
+        if (b < -4) return b + 5;
+
+        int len = b;
+        if (len < 0) len = -len;
+
+        byte[] bytes = _reader.ReadBytes(len);
+        int result = 0;
+
+        if (b > 0)
+        {
+            for (int i = 0; i < len; i++)
+                result |= (bytes[i] << (i * 8));
+        }
+        else
+        {
+            result = -1;
+            for (int i = 0; i < len; i++)
+            {
+                result &= ~(0xFF << (i * 8));
+                result |= (bytes[i] << (i * 8));
+            }
+        }
+        return result;
+    }
+
+    private byte[] ReadStringBytes()
+    {
+        int len = ReadFixnum();
+        return _reader.ReadBytes(len);
+    }
+}

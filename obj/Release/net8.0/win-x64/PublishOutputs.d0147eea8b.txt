@@ -1,0 +1,2 @@
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX\bin\Release\net8.0\win-x64\publish\AnilHeX.pdb
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX\bin\Release\net8.0\win-x64\publish\AnilHeX.exe
