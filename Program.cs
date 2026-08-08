@@ -1,66 +1,31 @@
 ﻿using System;
+using System.Windows.Forms;
 using System.IO;
 
-class Program
+static class Program
 {
-    static void Main(string[] args)
+    [STAThread]
+    static void Main()
     {
-        Console.WriteLine("========================================");
-        Console.WriteLine("        AñilHeX - Test de Mote           ");
-        Console.WriteLine("========================================");
+        // Atrapamos cualquier error inesperado de la interfaz o procesos en segundo plano
+        Application.ThreadException += (s, e) => LogFatalError(e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (s, e) => LogFatalError(e.ExceptionObject as Exception);
 
-        PBSReader pbs = new PBSReader();
-        string pbsPath = Path.Combine(Directory.GetCurrentDirectory(), "PBS");
-        
-        if (Directory.Exists(pbsPath)) pbs.LoadPBSDirectory(pbsPath);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        Application.Run(new MainForm());
+    }
 
-        string appDataRoaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        string[] possibleFolders = {
-            Path.Combine(appDataRoaming, "Pokemon Anil"),
-            Path.Combine(appDataRoaming, "Pokémon Añil"),
-            Path.Combine(appDataRoaming, "PokemonAnil")
-        };
-
-        string saveDir = null;
-        foreach (string folder in possibleFolders)
-        {
-            if (Directory.Exists(folder)) { saveDir = folder; break; }
-        }
-
-        if (string.IsNullOrEmpty(saveDir)) return;
-
-        string[] saveFiles = Directory.GetFiles(saveDir, "Partida *.rxdata");
-        if (saveFiles.Length == 0) return;
-
-        string savePath = saveFiles[0];
-        Console.WriteLine($"[*] Archivo detectado: {Path.GetFileName(savePath)}");
-
+    static void LogFatalError(Exception ex)
+    {
         try
         {
-            SaveParser parser = new SaveParser(savePath, pbs);
-            SaveDataModel data = parser.ParseSave();
-
-            if (data.Party.Count > 0)
-            {
-                Pokemon p1 = data.Party[0];
-                Console.WriteLine("\n--- DATOS ACTUALES ---");
-                Console.WriteLine($"Especie: {p1.Species}");
-                Console.WriteLine($"Mote Actual: {p1.Nickname}");
-
-                Console.WriteLine("\n[*] Escribiendo 'ANIL-HEX' como nuevo mote...");
-                
-                SaveWriter writer = new SaveWriter(savePath, data.RootData);
-                bool modificado = writer.ModifyPartyPokemon(0, newNickname: "ANIL-HEX");
-                
-                if (modificado && writer.Save())
-                {
-                    Console.WriteLine("[+] ¡Partida guardada! Abre el juego y verifica si el Emboar cambió de nombre.");
-                }
-            }
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string logPath = Path.Combine(baseDir, "errorlog_fatal.txt");
+            File.AppendAllText(logPath, $"[{DateTime.Now}] CRASH FATAL:\n{ex}\n\n");
+            
+            MessageBox.Show("El programa sufrió un error crítico. Se ha guardado el reporte en la carpeta de tu proyecto como 'errorlog_fatal.txt'.\n\nDetalle: " + ex.Message, "Error fatal", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[-] Error Crítico: {ex.Message}");
-        }
+        catch { }
     }
 }
