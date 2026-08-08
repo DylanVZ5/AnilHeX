@@ -26,36 +26,17 @@ public class MainForm : Form
 
     public static readonly string AppRoot = GetAppRoot();
 
-    public static readonly List<string[]> ParadoxGroups = new List<string[]> {
-        new[] { "DONPHAN", "GREATTUSK", "IRONTREADS" },
-        new[] { "VOLCARONA", "SLITHERWING", "IRONMOTH" },
-        new[] { "JIGGLYPUFF", "SCREAMTAIL" },
-        new[] { "AMOONGUSS", "BRUTEBONNET" },
-        new[] { "MISDREAVUS", "FLUTTERMANE" },
-        new[] { "MAGNETON", "SANDYSHOCKS" },
-        new[] { "SALAMENCE", "ROARINGMOON" },
-        new[] { "DELIBIRD", "IRONBUNDLE" },
-        new[] { "HARIYAMA", "IRONHANDS" },
-        new[] { "HYDREIGON", "IRONJUGULIS" },
-        new[] { "TYRANITAR", "IRONTHORNS" },
-        new[] { "GARDEVOIR", "GALLADE", "IRONVALIANT" },
-        new[] { "SUICUNE", "WALKINGWAKE" },
-        new[] { "VIRIZION", "IRONLEAVES" },
-        new[] { "RAIKOU", "RAGINGBOLT" },
-        new[] { "ENTEI", "GOUGINGFIRE" },
-        new[] { "COBALION", "IRONCROWN" },
-        new[] { "TERRAKION", "IRONBOULDER" },
-        new[] { "CYCLIZAR", "KORAIDON", "MIRAIDON" }
-    };
-
     private TabControl tabMain;
     private TabPage tabParty, tabPC, tabTrainer;
-    private ListBox lstParty;
-    private ContextMenuStrip partyMenu;
+    
+    private PictureBox[] partySlots = new PictureBox[6];
+    private Label[] partyLabels = new Label[6];
+    
     private ComboBox cbBoxSelector;
     private Button btnPrevBox, btnNextBox, btnAddPokemon;
     private PictureBox[] pcSlots = new PictureBox[30];
-    private ContextMenuStrip pcMenu;
+    
+    private ContextMenuStrip pokeMenu;
     
     private TabControl tabBagPockets;
     private DataGridView[] dgvPockets = new DataGridView[9]; 
@@ -78,10 +59,11 @@ public class MainForm : Form
     private NumericUpDown numLevel;
     private ComboBox cbNature, cbAbility, cbItem, cbGender;
     private Button btnDescAbility;
-    private Label lblNatureInfo;
+    private Button btnChangeFormInEditor; 
 
     private NumericUpDown[] numIVs = new NumericUpDown[6];
     private NumericUpDown[] numEVs = new NumericUpDown[6];
+    private Label[] lblStatNames = new Label[6]; 
     private string[] statNames = { "PS", "Ataque", "Defensa", "At. Esp", "Def. Esp", "Velocidad" };
 
     private ComboBox[] cbMoves = new ComboBox[4];
@@ -133,33 +115,76 @@ public class MainForm : Form
         btnSave.Click += BtnSave_Click;
         this.Controls.Add(btnSave);
 
-        tabMain = new TabControl { Location = new Point(12, 50), Size = new Size(380, 420) };
-        
-        tabParty = new TabPage("Equipo");
-        lstParty = new ListBox { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 11F) };
-        lstParty.SelectedIndexChanged += LstParty_SelectedIndexChanged;
-        
-        lstParty.MouseDown += (s, e) => {
-            if (e.Button == MouseButtons.Right) {
-                int idx = lstParty.IndexFromPoint(e.Location);
-                if (idx != ListBox.NoMatches) lstParty.SelectedIndex = idx;
+        tabMain = new TabControl { Location = new Point(12, 50), Size = new Size(380, 420), AllowDrop = true };
+        tabMain.DragOver += (s, e) => {
+            Point pt = tabMain.PointToClient(new Point(e.X, e.Y));
+            for (int i = 0; i < tabMain.TabPages.Count; i++) {
+                if (tabMain.GetTabRect(i).Contains(pt)) {
+                    if (tabMain.SelectedIndex != i) tabMain.SelectedIndex = i;
+                    return;
+                }
             }
         };
+        
+        tabParty = new TabPage("Equipo");
+        tabParty.AllowDrop = true;
 
-        partyMenu = new ContextMenuStrip();
-        partyMenu.Items.Add("Enviar a la Caja del PC").Click += SendPartyToPC_Click;
-        partyMenu.Items.Add("Cambiar Forma / Paradox").Click += ChangeForm_Click; 
-        
-        partyMenu.Opening += (s, e) => {
-            if (lstParty.SelectedIndex < 0 || currentSaveData == null) { e.Cancel = true; return; }
-            Pokemon p = currentSaveData.Party[lstParty.SelectedIndex];
-            partyMenu.Items[1].Visible = HasFormsOrParadox(p.InternalSpecies);
+        pokeMenu = new ContextMenuStrip();
+        pokeMenu.Items.Add("Mover al Equipo / PC").Click += MovePokemonQuick_Click;
+        pokeMenu.Items.Add("Cambiar Forma / Paradox").Click += ChangeForm_Click; 
+        pokeMenu.Items.Add("Eliminar Pokémon").Click += DeletePokemon_Click;
+
+        pokeMenu.Opening += (s, e) => {
+            var pb = (s as ContextMenuStrip).SourceControl as PictureBox;
+            if (pb == null || currentSaveData == null) { e.Cancel = true; return; }
+            
+            bool isParty = pb.Parent == tabParty;
+            int slot = (int)pb.Tag;
+            
+            Pokemon p = isParty ? 
+                (slot < currentSaveData.Party.Count ? currentSaveData.Party[slot] : null) : 
+                currentSaveData.Boxes[currentBoxIndex].Slots[slot];
+                
+            if (p == null) { e.Cancel = true; return; }
+            
+            pokeMenu.Items[0].Text = isParty ? "Enviar a la Caja del PC" : "Enviar al Equipo";
+            pokeMenu.Items[1].Visible = FormDatabase.HasFormsOrParadox(p.InternalSpecies, AppRoot);
         };
-        
-        lstParty.ContextMenuStrip = partyMenu;
-        tabParty.Controls.Add(lstParty);
+
+        for (int i = 0; i < 6; i++)
+        {
+            int col = i % 2;
+            int row = i / 2;
+            int px = 20 + (col * 180);
+            int py = 20 + (row * 100);
+
+            partySlots[i] = new PictureBox {
+                Location = new Point(px, py), Size = new Size(64, 64),
+                BorderStyle = BorderStyle.FixedSingle, SizeMode = PictureBoxSizeMode.CenterImage,
+                Cursor = Cursors.Hand, Tag = i, AllowDrop = true,
+                ContextMenuStrip = pokeMenu, BackColor = Color.WhiteSmoke
+            };
+            
+            partySlots[i].MouseDown += UniversalSlot_MouseDown;
+            partySlots[i].MouseMove += UniversalSlot_MouseMove;
+            partySlots[i].MouseUp += UniversalSlot_MouseUp;
+            partySlots[i].DragEnter += UniversalSlot_DragEnter;
+            partySlots[i].DragDrop += PartySlot_DragDrop;
+            partySlots[i].Click += PartySlot_ClickAction; 
+
+            partyLabels[i] = new Label {
+                Location = new Point(px + 70, py + 15), Size = new Size(100, 40),
+                TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Text = "Vacío", ForeColor = Color.Gray
+            };
+
+            tabParty.Controls.Add(partySlots[i]);
+            tabParty.Controls.Add(partyLabels[i]);
+        }
+        tabMain.TabPages.Add(tabParty);
         
         tabPC = new TabPage("Cajas PC");
+        tabPC.AllowDrop = true;
         
         btnPrevBox = new Button { Text = "<", Location = new Point(5, 10), Size = new Size(25, 25), AllowDrop = true };
         btnPrevBox.Click += (s, e) => { if (cbBoxSelector.SelectedIndex > 0) cbBoxSelector.SelectedIndex--; };
@@ -179,33 +204,21 @@ public class MainForm : Form
         btnAddPokemon.Click += BtnAddPokemon_Click;
         tabPC.Controls.Add(btnAddPokemon);
 
-        pcMenu = new ContextMenuStrip();
-        pcMenu.Items.Add("Enviar al Equipo").Click += SendPCToParty_Click;
-        pcMenu.Items.Add("Cambiar Forma / Paradox").Click += ChangeForm_Click; 
-        pcMenu.Items.Add("Eliminar Pokémon").Click += DeletePokemon_Click;
-
-        pcMenu.Opening += (s, e) => {
-            var pb = (s as ContextMenuStrip).SourceControl as PictureBox;
-            int slot = (int)pb.Tag;
-            if (currentSaveData == null || currentSaveData.Boxes[currentBoxIndex].Slots[slot] == null) { e.Cancel = true; return; }
-            Pokemon p = currentSaveData.Boxes[currentBoxIndex].Slots[slot];
-            pcMenu.Items[1].Visible = HasFormsOrParadox(p.InternalSpecies);
-        };
-
         for (int i = 0; i < 30; i++)
         {
             int col = i % 6, row = i / 6;
-            pcSlots[i] = new PictureBox { Location = new Point(10 + (col * 58), 50 + (row * 58)), Size = new Size(54, 54), BorderStyle = BorderStyle.FixedSingle, SizeMode = PictureBoxSizeMode.CenterImage, Cursor = Cursors.Hand, Tag = i, AllowDrop = true, ContextMenuStrip = pcMenu };
+            pcSlots[i] = new PictureBox { Location = new Point(10 + (col * 58), 50 + (row * 58)), Size = new Size(54, 54), BorderStyle = BorderStyle.FixedSingle, SizeMode = PictureBoxSizeMode.CenterImage, Cursor = Cursors.Hand, Tag = i, AllowDrop = true, ContextMenuStrip = pokeMenu };
             
-            pcSlots[i].MouseDown += PcSlot_MouseDown;
-            pcSlots[i].MouseMove += PcSlot_MouseMove;
-            pcSlots[i].MouseUp += PcSlot_MouseUp;
-            pcSlots[i].DragEnter += PcSlot_DragEnter;
+            pcSlots[i].MouseDown += UniversalSlot_MouseDown;
+            pcSlots[i].MouseMove += UniversalSlot_MouseMove;
+            pcSlots[i].MouseUp += UniversalSlot_MouseUp;
+            pcSlots[i].DragEnter += UniversalSlot_DragEnter;
             pcSlots[i].DragDrop += PcSlot_DragDrop;
             pcSlots[i].Click += PcSlot_ClickAction; 
 
             tabPC.Controls.Add(pcSlots[i]);
         }
+        tabMain.TabPages.Add(tabPC);
 
         tabTrainer = new TabPage("Entrenador");
         
@@ -215,15 +228,12 @@ public class MainForm : Form
         for (int pId = 1; pId <= 8; pId++)
         {
             TabPage pTab = new TabPage(PocketNames[pId]);
-            // --- ARREGLO DE UX: BLOQUEAR REDIMENSIONAMIENTO DE TABLAS ---
             dgvPockets[pId] = new DataGridView { 
                 Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = true, 
                 RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, 
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                AllowUserToResizeRows = false,        // Bloquea encoger/agrandar filas
-                AllowUserToResizeColumns = false      // Bloquea encoger/agrandar columnas
+                AllowUserToResizeRows = false, AllowUserToResizeColumns = false
             };
-            // -------------------------------------------------------------
             dgvPockets[pId].Columns.Add("InternalName", "ID");
             dgvPockets[pId].Columns["InternalName"].Visible = false;
             dgvPockets[pId].Columns.Add("Name", "Objeto");
@@ -259,8 +269,6 @@ public class MainForm : Form
         btnBagRemove.Click += BtnBagRemove_Click;
         tabTrainer.Controls.Add(btnBagRemove);
 
-        tabMain.TabPages.Add(tabParty);
-        tabMain.TabPages.Add(tabPC);
         tabMain.TabPages.Add(tabTrainer);
         this.Controls.Add(tabMain);
 
@@ -299,48 +307,87 @@ public class MainForm : Form
 
         pageGen.Controls.Add(new Label { Text = "Habilidad:", Location = new Point(15, 100), Size = new Size(70, 20) });
         
-        // --- LIMPIEZA DE INTERFAZ: FUERA BOTÓN TODAS, NUEVO AUTO ▼ ---
-        cbAbility = new ComboBox { Location = new Point(90, 97), Size = new Size(160, 23), AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems };
+        cbAbility = new ComboBox { Location = new Point(90, 97), Size = new Size(130, 23), AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems };
         cbAbility.TextUpdate += (s, e) => { if (cbAbility.DroppedDown) cbAbility.DroppedDown = false; };
         pageGen.Controls.Add(cbAbility);
         
-        btnDescAbility = new Button { Text = "?", Location = new Point(255, 96), Size = new Size(25, 25) };
+        btnDescAbility = new Button { Text = "?", Location = new Point(223, 96), Size = new Size(23, 25) };
         btnDescAbility.Click += (s, e) => ShowDescription(pbs.Abilities, pbs.AbilityDescriptions, cbAbility.Text, "Habilidad");
         pageGen.Controls.Add(btnDescAbility);
 
-        Button btnAutoAbil = new Button { Text = "Auto ▼", Location = new Point(285, 96), Size = new Size(65, 25), BackColor = Color.LightYellow };
+        Button btnAutoAbil = new Button { Text = "Auto ▼", Location = new Point(250, 96), Size = new Size(42, 25), BackColor = Color.LightYellow };
         ContextMenuStrip autoMenu = new ContextMenuStrip();
         autoMenu.Items.Add("Auto: Ranura 1 (Principal)").Click += (s,e) => { cbAbility.Text = "Auto: Ranura 1"; };
         autoMenu.Items.Add("Auto: Ranura 2 (Secundaria)").Click += (s,e) => { cbAbility.Text = "Auto: Ranura 2"; };
         autoMenu.Items.Add("Auto: Ranura 3 (Oculta)").Click += (s,e) => { cbAbility.Text = "Auto: Oculta"; };
         btnAutoAbil.Click += (s, e) => { autoMenu.Show(btnAutoAbil, new Point(0, btnAutoAbil.Height)); };
         pageGen.Controls.Add(btnAutoAbil);
-        // --------------------------------------------------------------
 
         pageGen.Controls.Add(new Label { Text = "Naturaleza:", Location = new Point(15, 140), Size = new Size(70, 20) });
-        cbNature = new ComboBox { Location = new Point(90, 137), Size = new Size(130, 23), DropDownStyle = ComboBoxStyle.DropDownList };
+        
+        cbNature = new ComboBox { Location = new Point(90, 137), Size = new Size(240, 23), DropDownStyle = ComboBoxStyle.DropDownList };
         cbNature.SelectedIndexChanged += (s, e) => {
             if (!isUpdatingUI) {
-                string intNat = GetInternalId(pbs.Natures, cbNature.Text, "");
-                lblNatureInfo.Text = GetNatureEffect(intNat);
+                UpdateStatColorsByNature();
             }
         };
         pageGen.Controls.Add(cbNature);
 
-        lblNatureInfo = new Label { Location = new Point(225, 140), Size = new Size(125, 20), ForeColor = Color.DarkBlue, Font = new Font(this.Font, FontStyle.Italic) };
-        pageGen.Controls.Add(lblNatureInfo);
-
         pageGen.Controls.Add(new Label { Text = "Sexo:", Location = new Point(15, 180), Size = new Size(70, 20) });
-        cbGender = new ComboBox { Location = new Point(90, 177), Size = new Size(130, 23), DropDownStyle = ComboBoxStyle.DropDownList };
+        cbGender = new ComboBox { Location = new Point(90, 177), Size = new Size(110, 23), DropDownStyle = ComboBoxStyle.DropDownList };
         cbGender.Items.AddRange(new string[] { "Macho ♂", "Hembra ♀", "Sin Género ⚲" });
         pageGen.Controls.Add(cbGender);
 
-        Button btnMaxHappiness = new Button { Text = "Max Felicidad ♥", Location = new Point(230, 176), Size = new Size(110, 25), BackColor = Color.LightPink };
+        Button btnMaxHappiness = new Button { Text = "Max Felicidad ♥", Location = new Point(210, 176), Size = new Size(120, 25), BackColor = Color.LightPink };
         btnMaxHappiness.Click += (s, e) => {
             Pokemon p = GetCurrentPokemon();
             if (p != null) { p.Happiness = 255; lblStatus.Text = $"¡Felicidad de {p.Nickname} al máximo (255)!"; lblStatus.ForeColor = Color.DeepPink; }
         };
         pageGen.Controls.Add(btnMaxHappiness);
+
+        btnChangeFormInEditor = new Button { 
+            Text = "🌀 Cambiar Forma / Paradox", 
+            Location = new Point(15, 220), 
+            Size = new Size(315, 30), 
+            BackColor = Color.Lavender, 
+            Font = new Font("Segoe UI", 9.5F, FontStyle.Bold) 
+        };
+        btnChangeFormInEditor.Click += (s, e) => {
+            Pokemon p = GetCurrentPokemon();
+            if (p == null) return;
+            using (ChangeFormDialog formDialog = new ChangeFormDialog(pbs, p))
+            {
+                if (formDialog.ShowDialog() == DialogResult.OK)
+                {
+                    lblStatus.Text = "⏳ Aplicando transformación y guardando...";
+                    lblStatus.ForeColor = Color.DarkOrange;
+                    this.Cursor = Cursors.WaitCursor;
+                    Application.DoEvents();
+
+                    try {
+                        ApplyCurrentEdits();
+                        p.Form = formDialog.SelectedForm;
+                        if (!string.IsNullOrEmpty(formDialog.SelectedSpeciesInternal))
+                        {
+                            p.InternalSpecies = formDialog.SelectedSpeciesInternal;
+                            p.Species = pbs.GetName(pbs.Species, p.InternalSpecies, p.InternalSpecies);
+                        }
+                        p.InternalAbility = "AUTO_0"; 
+                        p.Ability = "Auto: Ranura 1"; 
+                        p.Nickname = p.Species; 
+
+                        SyncAllToRuby();
+                        ReloadFromMemory();
+                        
+                        lblStatus.Text = $"Forma de {p.Nickname} actualizada correctamente.";
+                        lblStatus.ForeColor = Color.DarkViolet;
+                    } finally {
+                        this.Cursor = Cursors.Default;
+                    }
+                }
+            }
+        };
+        pageGen.Controls.Add(btnChangeFormInEditor);
 
         tabEditor.TabPages.Add(pageGen);
 
@@ -348,12 +395,16 @@ public class MainForm : Form
         pageStats.Controls.Add(new Label { Text = "Stat", Location = new Point(20, 15), Size = new Size(60, 20), Font = new Font(this.Font, FontStyle.Bold) });
         pageStats.Controls.Add(new Label { Text = "IVs (0-31)", Location = new Point(120, 15), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) });
         pageStats.Controls.Add(new Label { Text = "EVs (0-252)", Location = new Point(220, 15), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) });
+        
         for (int i = 0; i < 6; i++)
         {
             int yPos = 40 + (i * 35);
-            pageStats.Controls.Add(new Label { Text = statNames[i], Location = new Point(20, yPos + 2), Size = new Size(80, 20) });
+            lblStatNames[i] = new Label { Text = statNames[i], Location = new Point(20, yPos + 2), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) };
+            pageStats.Controls.Add(lblStatNames[i]);
+            
             numIVs[i] = new NumericUpDown { Location = new Point(120, yPos), Size = new Size(60, 23), Minimum = 0, Maximum = 31 };
             pageStats.Controls.Add(numIVs[i]);
+            
             numEVs[i] = new NumericUpDown { Location = new Point(220, yPos), Size = new Size(60, 23), Minimum = 0, Maximum = 252 };
             pageStats.Controls.Add(numEVs[i]);
         }
@@ -397,6 +448,181 @@ public class MainForm : Form
         this.Controls.Add(lblStatus);
     }
 
+    private void UniversalSlot_MouseDown(object sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            dragStartPos = e.Location;
+            dragSlotIndex = (int)((PictureBox)sender).Tag;
+            isDragging = false;
+        }
+    }
+
+    private void UniversalSlot_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && dragSlotIndex != -1 && !isDragging)
+        {
+            if (Math.Abs(e.X - dragStartPos.X) > 4 || Math.Abs(e.Y - dragStartPos.Y) > 4)
+            {
+                PictureBox pb = (PictureBox)sender;
+                bool isPartySlot = pb.Parent == tabParty;
+                
+                if (isPartySlot) {
+                    if (currentSaveData != null && dragSlotIndex < currentSaveData.Party.Count) {
+                        isDragging = true;
+                        int slot = dragSlotIndex;
+                        dragSlotIndex = -1; 
+                        pb.DoDragDrop(new DragData { IsParty = true, BoxIndex = 0, SlotIndex = slot }, DragDropEffects.Move);
+                    }
+                } else {
+                    if (currentSaveData != null && currentSaveData.Boxes[currentBoxIndex].Slots[dragSlotIndex] != null) {
+                        isDragging = true;
+                        int slot = dragSlotIndex;
+                        dragSlotIndex = -1; 
+                        pb.DoDragDrop(new DragData { IsParty = false, BoxIndex = currentBoxIndex, SlotIndex = slot }, DragDropEffects.Move);
+                    }
+                }
+            }
+        }
+    }
+
+    private void UniversalSlot_MouseUp(object sender, MouseEventArgs e) 
+    { 
+        if (!isDragging && dragSlotIndex != -1) {
+            PictureBox pb = (PictureBox)sender;
+            if (pb.Parent == tabParty) PartySlot_ClickAction(sender, EventArgs.Empty);
+            else PcSlot_ClickAction(sender, EventArgs.Empty);
+        }
+        dragSlotIndex = -1; 
+        isDragging = false;
+    }
+
+    private void UniversalSlot_DragEnter(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(typeof(DragData))) e.Effect = DragDropEffects.Move;
+    }
+
+    private void PartySlot_ClickAction(object sender, EventArgs e)
+    {
+        if (isUpdatingUI) return;
+        PictureBox clickedSlot = sender as PictureBox;
+        if (clickedSlot == null) return;
+        int slotIndex = (int)clickedSlot.Tag;
+        
+        if (currentSaveData == null || slotIndex >= currentSaveData.Party.Count) { 
+            ApplyCurrentEdits();
+            grpEditor.Enabled = false; 
+            currentSlotIndex = -1;
+            return; 
+        }
+        
+        ApplyCurrentEdits();
+        isEditingParty = true;
+        currentSlotIndex = slotIndex;
+        LoadPokemonToEditor();
+    }
+
+    private void PcSlot_ClickAction(object sender, EventArgs e)
+    {
+        if (isUpdatingUI) return;
+        PictureBox clickedSlot = sender as PictureBox;
+        if (clickedSlot == null) return;
+        int slotIndex = (int)clickedSlot.Tag;
+        
+        if (currentSaveData.Boxes[currentBoxIndex].Slots[slotIndex] == null) { 
+            ApplyCurrentEdits();
+            grpEditor.Enabled = false; 
+            currentSlotIndex = -1;
+            return; 
+        }
+        
+        ApplyCurrentEdits();
+        isEditingParty = false;
+        currentSlotIndex = slotIndex;
+        LoadPokemonToEditor();
+    }
+
+    private void PartySlot_DragDrop(object sender, DragEventArgs e)
+    {
+        DragData source = (DragData)e.Data.GetData(typeof(DragData));
+        PictureBox pb = sender as PictureBox;
+        int targetSlot = (int)pb.Tag;
+        Unified_DragDrop(source, true, 0, targetSlot);
+    }
+
+    private void PcSlot_DragDrop(object sender, DragEventArgs e)
+    {
+        DragData source = (DragData)e.Data.GetData(typeof(DragData));
+        PictureBox pb = sender as PictureBox;
+        int targetSlot = (int)pb.Tag;
+        Unified_DragDrop(source, false, currentBoxIndex, targetSlot);
+    }
+
+    private void Unified_DragDrop(DragData source, bool targetIsParty, int targetBox, int targetSlot)
+    {
+        if (source.IsParty == targetIsParty && source.BoxIndex == targetBox && source.SlotIndex == targetSlot) return;
+
+        lblStatus.Text = "⏳ Moviendo Pokémon...";
+        lblStatus.ForeColor = Color.DarkOrange;
+        this.Cursor = Cursors.WaitCursor;
+        Application.DoEvents();
+
+        try {
+            ApplyCurrentEdits();
+            SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
+
+            if (source.IsParty && !targetIsParty) 
+            {
+                if (currentSaveData.Boxes[targetBox].Slots[targetSlot] != null) {
+                    writer.SwapPokemonInRuby(true, 0, source.SlotIndex, false, targetBox, targetSlot);
+                } else {
+                    writer.ClonePokemonInRuby(true, 0, source.SlotIndex, false, targetBox, targetSlot);
+                    writer.DeletePokemonInRuby(true, 0, source.SlotIndex);
+                }
+            }
+            else if (!source.IsParty && targetIsParty) 
+            {
+                if (targetSlot < currentSaveData.Party.Count) {
+                    writer.SwapPokemonInRuby(false, source.BoxIndex, source.SlotIndex, true, 0, targetSlot);
+                } else {
+                    if (currentSaveData.Party.Count >= 6) {
+                        MessageBox.Show("El equipo ya está lleno.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    writer.ClonePokemonInRuby(false, source.BoxIndex, source.SlotIndex, true, 0, currentSaveData.Party.Count);
+                    writer.DeletePokemonInRuby(false, source.BoxIndex, source.SlotIndex);
+                }
+            }
+            else if (!source.IsParty && !targetIsParty) 
+            {
+                writer.SwapPokemonInRuby(false, source.BoxIndex, source.SlotIndex, false, targetBox, targetSlot);
+            }
+            else if (source.IsParty && targetIsParty) 
+            {
+                if (targetSlot < currentSaveData.Party.Count) {
+                    writer.SwapPokemonInRuby(true, 0, source.SlotIndex, true, 0, targetSlot);
+                } else {
+                    writer.ClonePokemonInRuby(true, 0, source.SlotIndex, true, 0, currentSaveData.Party.Count);
+                    writer.DeletePokemonInRuby(true, 0, source.SlotIndex);
+                }
+            }
+
+            ReloadFromMemory();
+            
+            if (isEditingParty == targetIsParty) {
+                if (currentBoxIndex == targetBox || targetIsParty) {
+                    currentSlotIndex = targetIsParty ? Math.Min(targetSlot, currentSaveData.Party.Count - 1) : targetSlot;
+                }
+            }
+            LoadPokemonToEditor();
+            
+            lblStatus.Text = "Pokémon movido con éxito.";
+            lblStatus.ForeColor = Color.Green;
+        } finally {
+            this.Cursor = Cursors.Default;
+        }
+    }
+
     private void LogError(Exception ex, string context = "")
     {
         try
@@ -406,51 +632,82 @@ public class MainForm : Form
         } catch { }
     }
 
-    private bool HasFormsOrParadox(string internalSpecies)
-    {
-        if (string.IsNullOrEmpty(internalSpecies)) return false;
-        string spc = internalSpecies.ToUpper();
-        
-        if (ParadoxGroups.Any(g => g.Contains(spc))) return true;
-        
-        string basePath = Path.Combine(AppRoot, "Graphics", "Pokemon", "Icons");
-        if (File.Exists(Path.Combine(basePath, $"{spc}_1.png")) || 
-            File.Exists(Path.Combine(basePath, $"{spc}_1_s.png")) || 
-            File.Exists(Path.Combine(basePath, $"{spc}_1s.png")))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
     private string GetNatureEffect(string internalNature)
     {
         switch (internalNature?.ToUpper())
         {
-            case "LONELY": return "+Ataque, -Defensa";
-            case "BRAVE": return "+Ataque, -Velocid.";
-            case "ADAMANT": return "+Ataque, -At. Esp.";
-            case "NAUGHTY": return "+Ataque, -Def. Esp.";
-            case "BOLD": return "+Defensa, -Ataque";
-            case "RELAXED": return "+Defensa, -Velocid.";
-            case "IMPISH": return "+Defensa, -At. Esp.";
-            case "LAX": return "+Defensa, -Def. Esp.";
-            case "TIMID": return "+Velocid., -Ataque";
-            case "HASTY": return "+Velocid., -Defensa";
-            case "JOLLY": return "+Velocid., -At. Esp.";
-            case "NAIVE": return "+Velocid., -Def. Esp.";
-            case "MODEST": return "+At. Esp., -Ataque";
-            case "MILD": return "+At. Esp., -Defensa";
-            case "QUIET": return "+At. Esp., -Velocid.";
-            case "RASH": return "+At. Esp., -Def. Esp.";
-            case "CALM": return "+Def. Esp., -Ataque";
-            case "GENTLE": return "+Def. Esp., -Defensa";
-            case "SASSY": return "+Def. Esp., -Velocid.";
-            case "CAREFUL": return "+Def. Esp., -At. Esp.";
-            case "HARDY": case "DOCILE": case "SERIOUS": case "BASHFUL": case "QUIRKY": return "Neutra (Sin cambios)";
+            case "LONELY": return "(+Ataque, -Defensa)";
+            case "BRAVE": return "(+Ataque, -Velocid.)";
+            case "ADAMANT": return "(+Ataque, -At. Esp.)";
+            case "NAUGHTY": return "(+Ataque, -Def. Esp.)";
+            case "BOLD": return "(+Defensa, -Ataque)";
+            case "RELAXED": return "(+Defensa, -Velocid.)";
+            case "IMPISH": return "(+Defensa, -At. Esp.)";
+            case "LAX": return "(+Defensa, -Def. Esp.)";
+            case "TIMID": return "(+Velocid., -Ataque)";
+            case "HASTY": return "(+Velocid., -Defensa)";
+            case "JOLLY": return "(+Velocid., -At. Esp.)";
+            case "NAIVE": return "(+Velocid., -Def. Esp.)";
+            case "MODEST": return "(+At. Esp., -Ataque)";
+            case "MILD": return "(+At. Esp., -Defensa)";
+            case "QUIET": return "(+At. Esp., -Velocid.)";
+            case "RASH": return "(+At. Esp., -Def. Esp.)";
+            case "CALM": return "(+Def. Esp., -Ataque)";
+            case "GENTLE": return "(+Def. Esp., -Defensa)";
+            case "SASSY": return "(+Def. Esp., -Velocid.)";
+            case "CAREFUL": return "(+Def. Esp., -At. Esp.)";
+            case "HARDY": case "DOCILE": case "SERIOUS": case "BASHFUL": case "QUIRKY": return "(Neutra)";
             default: return "";
         }
+    }
+
+    private string GetNatureDisplayName(string rawName, string internalNature)
+    {
+        string effect = GetNatureEffect(internalNature);
+        return string.IsNullOrEmpty(effect) ? rawName : $"{rawName} {effect}";
+    }
+
+    private void UpdateStatColorsByNature()
+    {
+        string selectedText = cbNature.Text;
+        string intNat = GetInternalIdFromNatureText(selectedText);
+
+        for (int i = 0; i < 6; i++) lblStatNames[i].ForeColor = Color.Black;
+
+        switch (intNat?.ToUpper())
+        {
+            case "LONELY": lblStatNames[1].ForeColor = Color.Red; lblStatNames[2].ForeColor = Color.Blue; break;
+            case "BRAVE":  lblStatNames[1].ForeColor = Color.Red; lblStatNames[5].ForeColor = Color.Blue; break;
+            case "ADAMANT":lblStatNames[1].ForeColor = Color.Red; lblStatNames[3].ForeColor = Color.Blue; break;
+            case "NAUGHTY":lblStatNames[1].ForeColor = Color.Red; lblStatNames[4].ForeColor = Color.Blue; break;
+
+            case "BOLD":   lblStatNames[2].ForeColor = Color.Red; lblStatNames[1].ForeColor = Color.Blue; break;
+            case "RELAXED":lblStatNames[2].ForeColor = Color.Red; lblStatNames[5].ForeColor = Color.Blue; break;
+            case "IMPISH": lblStatNames[2].ForeColor = Color.Red; lblStatNames[3].ForeColor = Color.Blue; break;
+            case "LAX":    lblStatNames[2].ForeColor = Color.Red; lblStatNames[4].ForeColor = Color.Blue; break;
+
+            case "MODEST": lblStatNames[3].ForeColor = Color.Red; lblStatNames[1].ForeColor = Color.Blue; break;
+            case "MILD":   lblStatNames[3].ForeColor = Color.Red; lblStatNames[2].ForeColor = Color.Blue; break;
+            case "QUIET":  lblStatNames[3].ForeColor = Color.Red; lblStatNames[5].ForeColor = Color.Blue; break;
+            case "RASH":   lblStatNames[3].ForeColor = Color.Red; lblStatNames[4].ForeColor = Color.Blue; break;
+
+            case "CALM":   lblStatNames[4].ForeColor = Color.Red; lblStatNames[1].ForeColor = Color.Blue; break;
+            case "GENTLE": lblStatNames[4].ForeColor = Color.Red; lblStatNames[2].ForeColor = Color.Blue; break;
+            case "SASSY":  lblStatNames[4].ForeColor = Color.Red; lblStatNames[5].ForeColor = Color.Blue; break;
+            case "CAREFUL":lblStatNames[4].ForeColor = Color.Red; lblStatNames[3].ForeColor = Color.Blue; break;
+
+            case "TIMID":  lblStatNames[5].ForeColor = Color.Red; lblStatNames[1].ForeColor = Color.Blue; break;
+            case "HASTY":  lblStatNames[5].ForeColor = Color.Red; lblStatNames[2].ForeColor = Color.Blue; break;
+            case "JOLLY":  lblStatNames[5].ForeColor = Color.Red; lblStatNames[3].ForeColor = Color.Blue; break;
+            case "NAIVE":  lblStatNames[5].ForeColor = Color.Red; lblStatNames[4].ForeColor = Color.Blue; break;
+        }
+    }
+
+    private string GetInternalIdFromNatureText(string comboText)
+    {
+        if (string.IsNullOrEmpty(comboText)) return "";
+        string cleanName = comboText.Split('(')[0].Trim();
+        return GetInternalId(pbs.Natures, cleanName, cleanName);
     }
 
     public static int CalculateExp(int level, string growthRate)
@@ -504,106 +761,116 @@ public class MainForm : Form
         SaveParser parser = new SaveParser(currentSavePath, pbs);
         currentSaveData = parser.ParseSave(currentSaveData.RootData); 
 
-        lstParty.Items.Clear();
-        foreach (var p in currentSaveData.Party) lstParty.Items.Add($"{p.Species} (Nv. {p.Level})");
-        
         isUpdatingUI = false;
+        RefreshPartyGrid();
         RefreshPCGrid();
         LoadPokemonToEditor();
     }
 
     private void ChangeForm_Click(object sender, EventArgs e)
     {
-        var item = sender as ToolStripItem;
-        bool isParty = item.Owner == partyMenu;
+        var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox;
+        if (pb == null) return;
         
-        int slot = -1;
-        if (isParty) slot = lstParty.SelectedIndex;
-        else 
-        {
-            var pb = (item.Owner as ContextMenuStrip).SourceControl as PictureBox;
-            slot = (int)pb.Tag;
-        }
+        bool isParty = pb.Parent == tabParty;
+        int slot = (int)pb.Tag;
 
-        if (slot < 0 || currentSaveData == null) return;
-        Pokemon p = isParty ? currentSaveData.Party[slot] : currentSaveData.Boxes[currentBoxIndex].Slots[slot];
+        if (currentSaveData == null) return;
+        Pokemon p = isParty ? 
+            (slot < currentSaveData.Party.Count ? currentSaveData.Party[slot] : null) : 
+            currentSaveData.Boxes[currentBoxIndex].Slots[slot];
+            
         if (p == null) return;
 
         using (ChangeFormDialog formDialog = new ChangeFormDialog(pbs, p))
         {
             if (formDialog.ShowDialog() == DialogResult.OK)
             {
-                ApplyCurrentEdits();
-                
-                p.Form = formDialog.SelectedForm;
-                if (!string.IsNullOrEmpty(formDialog.SelectedSpeciesInternal))
-                {
-                    p.InternalSpecies = formDialog.SelectedSpeciesInternal;
-                    p.Species = pbs.GetName(pbs.Species, p.InternalSpecies, p.InternalSpecies);
+                lblStatus.Text = "⏳ Aplicando transformación y guardando...";
+                lblStatus.ForeColor = Color.DarkOrange;
+                this.Cursor = Cursors.WaitCursor;
+                Application.DoEvents();
+
+                try {
+                    ApplyCurrentEdits();
+                    
+                    p.Form = formDialog.SelectedForm;
+                    if (!string.IsNullOrEmpty(formDialog.SelectedSpeciesInternal))
+                    {
+                        p.InternalSpecies = formDialog.SelectedSpeciesInternal;
+                        p.Species = pbs.GetName(pbs.Species, p.InternalSpecies, p.InternalSpecies);
+                    }
+
+                    p.InternalAbility = "AUTO_0"; 
+                    p.Ability = "Auto: Ranura 1"; 
+                    p.Nickname = p.Species; 
+
+                    SyncAllToRuby();
+                    ReloadFromMemory();
+                    
+                    lblStatus.Text = $"Forma de {p.Nickname} actualizada correctamente.";
+                    lblStatus.ForeColor = Color.DarkViolet;
+                } finally {
+                    this.Cursor = Cursors.Default;
                 }
-
-                p.InternalAbility = "AUTO_0"; 
-                p.Ability = "Auto: Ranura 1"; 
-                p.Nickname = p.Species; 
-
-                SyncAllToRuby();
-                ReloadFromMemory();
-                
-                lblStatus.Text = $"Forma de {p.Nickname} actualizada. La Habilidad será calculada por el juego.";
-                lblStatus.ForeColor = Color.DarkViolet;
             }
         }
     }
 
-    private void SendPartyToPC_Click(object sender, EventArgs e)
-    {
-        if (lstParty.SelectedIndex < 0 || currentSaveData == null) return;
-        int partyIdx = lstParty.SelectedIndex;
-
-        int targetBox = -1, targetSlot = -1;
-        for (int b = 0; b < currentSaveData.Boxes.Count; b++)
-        {
-            for (int s = 0; s < 30; s++)
-            {
-                if (currentSaveData.Boxes[b].Slots[s] == null) { targetBox = b; targetSlot = s; break; }
-            }
-            if (targetBox != -1) break;
-        }
-
-        if (targetBox == -1) { MessageBox.Show("Todas las cajas del PC están llenas.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-
-        ApplyCurrentEdits();
-        SyncAllToRuby();
-        
-        SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
-        writer.ClonePokemonInRuby(true, 0, partyIdx, false, targetBox, targetSlot);
-        writer.DeletePokemonInRuby(true, 0, partyIdx);
-
-        ReloadFromMemory();
-        grpEditor.Enabled = false;
-        lblStatus.Text = "Pokémon enviado a la caja con éxito.";
-        lblStatus.ForeColor = Color.Green;
-    }
-
-    private void SendPCToParty_Click(object sender, EventArgs e)
+    private void MovePokemonQuick_Click(object sender, EventArgs e)
     {
         var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox;
+        if (pb == null) return;
+        
+        bool isParty = pb.Parent == tabParty;
         int slot = (int)pb.Tag;
 
-        if (currentSaveData == null || currentSaveData.Boxes[currentBoxIndex].Slots[slot] == null) return;
-        if (currentSaveData.Party.Count >= 6) { MessageBox.Show("El equipo ya está lleno (máximo 6 Pokémon).", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        if (isParty) {
+            int targetBox = -1, targetSlot = -1;
+            for (int b = 0; b < currentSaveData.Boxes.Count; b++) {
+                for (int s = 0; s < 30; s++) {
+                    if (currentSaveData.Boxes[b].Slots[s] == null) { targetBox = b; targetSlot = s; break; }
+                }
+                if (targetBox != -1) break;
+            }
+            if (targetBox == -1) { MessageBox.Show("Todas las cajas del PC están llenas.", "Aviso"); return; }
+            Unified_DragDrop(new DragData { IsParty = true, BoxIndex = 0, SlotIndex = slot }, false, targetBox, targetSlot);
+        } else {
+            if (currentSaveData.Party.Count >= 6) { MessageBox.Show("El equipo ya está lleno.", "Aviso"); return; }
+            Unified_DragDrop(new DragData { IsParty = false, BoxIndex = currentBoxIndex, SlotIndex = slot }, true, 0, currentSaveData.Party.Count);
+        }
+    }
 
-        ApplyCurrentEdits();
-        SyncAllToRuby();
-        
-        SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
-        writer.ClonePokemonInRuby(false, currentBoxIndex, slot, true, 0, currentSaveData.Party.Count);
-        writer.DeletePokemonInRuby(false, currentBoxIndex, slot);
+    private void DeletePokemon_Click(object sender, EventArgs e)
+    {
+        var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox;
+        if (pb == null) return;
+        bool isParty = pb.Parent == tabParty;
+        int slot = (int)pb.Tag;
 
-        ReloadFromMemory();
-        grpEditor.Enabled = false;
-        lblStatus.Text = "Pokémon enviado al equipo con éxito.";
-        lblStatus.ForeColor = Color.Green;
+        if (MessageBox.Show("¿Eliminar de forma permanente?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+        {
+            lblStatus.Text = "⏳ Eliminando Pokémon...";
+            lblStatus.ForeColor = Color.DarkOrange;
+            this.Cursor = Cursors.WaitCursor;
+            Application.DoEvents();
+
+            try {
+                ApplyCurrentEdits();
+                SyncAllToRuby();
+
+                SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
+                if (isParty) writer.DeletePokemonInRuby(true, 0, slot);
+                else writer.DeletePokemonInRuby(false, currentBoxIndex, slot);
+                
+                ReloadFromMemory();
+                grpEditor.Enabled = false;
+                lblStatus.Text = "Pokémon eliminado.";
+                lblStatus.ForeColor = Color.Red;
+            } finally {
+                this.Cursor = Cursors.Default;
+            }
+        }
     }
 
     private void UpdateBagItemDropdown()
@@ -712,48 +979,35 @@ public class MainForm : Form
         {
             if (form.ShowDialog() == DialogResult.OK)
             {
-                ApplyCurrentEdits(); 
-                SyncAllToRuby();
+                lblStatus.Text = "⏳ Generando Pokémon e inyectando en la caja...";
+                lblStatus.ForeColor = Color.DarkOrange;
+                this.Cursor = Cursors.WaitCursor;
+                Application.DoEvents();
 
-                SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
-                string intSpc = form.SelectedSpeciesInternal;
-                string gr = pbs.SpeciesGrowthRates.ContainsKey(intSpc) ? pbs.SpeciesGrowthRates[intSpc] : "MEDIUMFAST";
-                int exactExp = CalculateExp(form.Level, gr);
-                
-                bool success = writer.AddPokemon(false, currentBoxIndex, intSpc, form.SelectedSpeciesName, form.Level, exactExp, "AUTO_0");
-                
-                if (success)
-                {
-                    ReloadFromMemory();
-                    isEditingParty = false;
-                    currentSlotIndex = targetSlot;
-                    LoadPokemonToEditor();
+                try {
+                    ApplyCurrentEdits(); 
+                    SyncAllToRuby();
 
-                    lblStatus.Text = $"¡Pokémon añadido! Habilidad lista para el Modo Random.";
-                    lblStatus.ForeColor = Color.Green;
+                    SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
+                    string intSpc = form.SelectedSpeciesInternal;
+                    string gr = pbs.SpeciesGrowthRates.ContainsKey(intSpc) ? pbs.SpeciesGrowthRates[intSpc] : "MEDIUMFAST";
+                    int exactExp = CalculateExp(form.Level, gr);
+                    
+                    bool success = writer.AddPokemon(false, currentBoxIndex, intSpc, form.SelectedSpeciesName, form.Level, exactExp, "AUTO_0");
+                    
+                    if (success)
+                    {
+                        ReloadFromMemory();
+                        isEditingParty = false;
+                        currentSlotIndex = targetSlot;
+                        LoadPokemonToEditor();
+
+                        lblStatus.Text = $"¡Pokémon añadido! Habilidad lista para el Modo Random.";
+                        lblStatus.ForeColor = Color.Green;
+                    }
+                } finally {
+                    this.Cursor = Cursors.Default;
                 }
-            }
-        }
-    }
-
-    private void DeletePokemon_Click(object sender, EventArgs e)
-    {
-        var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox;
-        int slot = (int)pb.Tag;
-
-        if (currentSaveData.Boxes[currentBoxIndex].Slots[slot] != null)
-        {
-            if (MessageBox.Show("¿Eliminar de forma permanente?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
-            {
-                ApplyCurrentEdits();
-                SyncAllToRuby();
-
-                SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
-                writer.DeletePokemonInRuby(false, currentBoxIndex, slot);
-                
-                ReloadFromMemory();
-                grpEditor.Enabled = false;
-                lblStatus.Text = "Pokémon eliminado.";
             }
         }
     }
@@ -769,98 +1023,30 @@ public class MainForm : Form
         }
     }
 
-    private void PcSlot_MouseDown(object sender, MouseEventArgs e)
+    private void RefreshPartyGrid()
     {
-        if (e.Button == MouseButtons.Left)
+        if (currentSaveData == null) return;
+        for (int i = 0; i < 6; i++)
         {
-            dragStartPos = e.Location;
-            dragSlotIndex = (int)((PictureBox)sender).Tag;
-            isDragging = false;
-        }
-    }
+            if (partySlots[i].Image != null) partySlots[i].Image.Dispose();
+            partySlots[i].Image = null;
 
-    private void PcSlot_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.Button == MouseButtons.Left && dragSlotIndex != -1 && !isDragging)
-        {
-            if (Math.Abs(e.X - dragStartPos.X) > 4 || Math.Abs(e.Y - dragStartPos.Y) > 4)
+            if (i < currentSaveData.Party.Count)
             {
-                if (currentSaveData != null && currentSaveData.Boxes[currentBoxIndex].Slots[dragSlotIndex] != null)
-                {
-                    isDragging = true;
-                    int slot = dragSlotIndex;
-                    dragSlotIndex = -1; 
-                    ((PictureBox)sender).DoDragDrop(new DragData { IsParty = false, BoxIndex = currentBoxIndex, SlotIndex = slot }, DragDropEffects.Move);
-                }
+                Pokemon p = currentSaveData.Party[i];
+                partySlots[i].BackColor = Color.LightCyan;
+                partySlots[i].Image = GetPokemonIcon(p.InternalSpecies, p.Form, p.IsShiny || p.IsSuperShiny);
+                partyLabels[i].Text = $"{p.Nickname}\nNv. {p.Level}";
+                partyLabels[i].ForeColor = Color.Black;
+            }
+            else
+            {
+                partySlots[i].BackColor = Color.WhiteSmoke;
+                partyLabels[i].Text = "Vacío";
+                partyLabels[i].ForeColor = Color.Gray;
             }
         }
     }
-
-    private void PcSlot_MouseUp(object sender, MouseEventArgs e) 
-    { 
-        if (!isDragging && dragSlotIndex != -1) PcSlot_ClickAction(sender, EventArgs.Empty);
-        dragSlotIndex = -1; 
-        isDragging = false;
-    }
-
-    private void PcSlot_ClickAction(object sender, EventArgs e)
-    {
-        if (isUpdatingUI) return;
-        PictureBox clickedSlot = sender as PictureBox;
-        if (clickedSlot == null) return;
-        int slotIndex = (int)clickedSlot.Tag;
-        
-        if (currentSaveData.Boxes[currentBoxIndex].Slots[slotIndex] == null) { 
-            ApplyCurrentEdits();
-            grpEditor.Enabled = false; 
-            currentSlotIndex = -1;
-            return; 
-        }
-        
-        ApplyCurrentEdits();
-        isEditingParty = false;
-        currentSlotIndex = slotIndex;
-        LoadPokemonToEditor();
-    }
-
-    private void PcSlot_DragEnter(object sender, DragEventArgs e)
-    {
-        if (e.Data.GetDataPresent(typeof(DragData))) e.Effect = DragDropEffects.Move;
-    }
-
-    private void PcSlot_DragDrop(object sender, DragEventArgs e)
-    {
-        DragData source = (DragData)e.Data.GetData(typeof(DragData));
-        PictureBox pb = sender as PictureBox;
-        int targetSlot = (int)pb.Tag;
-        
-        if (source.BoxIndex == currentBoxIndex && source.SlotIndex == targetSlot) return; 
-
-        ApplyCurrentEdits();
-
-        Pokemon p1 = currentSaveData.Boxes[source.BoxIndex].Slots[source.SlotIndex];
-        Pokemon p2 = currentSaveData.Boxes[currentBoxIndex].Slots[targetSlot];
-        currentSaveData.Boxes[source.BoxIndex].Slots[source.SlotIndex] = p2;
-        currentSaveData.Boxes[currentBoxIndex].Slots[targetSlot] = p1;
-
-        SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData);
-        writer.SwapPokemonInRuby(false, source.BoxIndex, source.SlotIndex, false, currentBoxIndex, targetSlot);
-
-        if (!isEditingParty)
-        {
-            if (currentBoxIndex == source.BoxIndex && currentSlotIndex == source.SlotIndex) currentSlotIndex = targetSlot;
-            else if (currentSlotIndex == targetSlot)
-            {
-                currentBoxIndex = source.BoxIndex;
-                currentSlotIndex = source.SlotIndex;
-            }
-        }
-
-        RefreshPCGrid();
-        LoadPokemonToEditor();
-    }
-
-    private void PcSlot_Click(object sender, EventArgs e) { } 
 
     private void RefreshPCGrid()
     {
@@ -935,8 +1121,8 @@ public class MainForm : Form
             p.InternalHeldItem = GetInternalId(pbs.Items, cbItem.Text, p.InternalHeldItem);
             if (string.IsNullOrWhiteSpace(p.InternalHeldItem)) p.InternalHeldItem = "Ninguno";
             
-            p.Nature = cbNature.Text;
-            p.InternalNature = GetInternalId(pbs.Natures, cbNature.Text, p.InternalNature);
+            p.Nature = GetInternalIdFromNatureText(cbNature.Text);
+            p.InternalNature = GetInternalIdFromNatureText(cbNature.Text);
             
             if (cbAbility.Text == "Auto: Ranura 1") {
                 p.Ability = "Auto: Ranura 1"; p.InternalAbility = "AUTO_0";
@@ -965,8 +1151,7 @@ public class MainForm : Form
                 }
             }
             
-            if (isEditingParty && currentSlotIndex >= 0)
-                lstParty.Items[currentSlotIndex] = $"{p.Species} (Nv. {p.Level})";
+            if (isEditingParty) RefreshPartyGrid();
         }
         catch (Exception ex)
         {
@@ -992,14 +1177,17 @@ public class MainForm : Form
 
     private void LoadSaveFile()
     {
+        lblStatus.Text = "⏳ Cargando partida y leyendo base de datos... ¡Un momento!";
+        lblStatus.ForeColor = Color.DarkOrange;
+        this.Cursor = Cursors.WaitCursor;
+        Application.DoEvents();
+
         try
         {
             SaveParser parser = new SaveParser(currentSavePath, pbs);
             currentSaveData = parser.ParseSave();
 
             isUpdatingUI = true;
-            lstParty.Items.Clear();
-            foreach (var p in currentSaveData.Party) lstParty.Items.Add($"{p.Species} (Nv. {p.Level})");
 
             cbBoxSelector.Items.Clear();
             foreach (var box in currentSaveData.Boxes) cbBoxSelector.Items.Add($"{box.Name} (Caja {box.BoxIndex})");
@@ -1017,12 +1205,14 @@ public class MainForm : Form
 
             if (pbs.IsLoaded)
             {
-                cbNature.Items.Clear(); cbNature.Items.AddRange(pbs.Natures.Values.Distinct().ToArray());
+                cbNature.Items.Clear(); 
+                foreach (var natKvp in pbs.Natures) {
+                    string disp = GetNatureDisplayName(natKvp.Value, natKvp.Key);
+                    if (!cbNature.Items.Contains(disp)) cbNature.Items.Add(disp);
+                }
                 
-                // --- AHORA SE CARGAN TODAS LAS HABILIDADES POR DEFECTO ---
                 cbAbility.Items.Clear();
                 cbAbility.Items.AddRange(pbs.Abilities.Values.Distinct().ToArray());
-                // -----------------------------------------------------------
 
                 cbItem.Items.Clear(); 
                 var allItemsList = pbs.Items.Select(x => pbs.GetName(pbs.Items, x.Key, x.Value)).Distinct().ToArray();
@@ -1035,9 +1225,9 @@ public class MainForm : Form
             isUpdatingUI = false; 
             
             if (cbBoxSelector.Items.Count > 0) cbBoxSelector.SelectedIndex = 0;
+            
+            RefreshPartyGrid();
             RefreshPCGrid();
-
-            tabBagPockets.SelectedIndex = 0;
             UpdateBagItemDropdown();
 
             btnSave.Enabled = true;
@@ -1051,16 +1241,13 @@ public class MainForm : Form
             btnSave.Enabled = false;
             LogError(ex, "LoadSaveFile");
         }
+        finally
+        {
+            this.Cursor = Cursors.Default;
+        }
     }
 
-    private void LstParty_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (isUpdatingUI || lstParty.SelectedIndex < 0) return;
-        ApplyCurrentEdits();
-        isEditingParty = true;
-        currentSlotIndex = lstParty.SelectedIndex;
-        LoadPokemonToEditor();
-    }
+    private void LstParty_SelectedIndexChanged(object sender, EventArgs e) {}
 
     private void CbBoxSelector_SelectedIndexChanged(object sender, EventArgs e)
     {
@@ -1084,14 +1271,18 @@ public class MainForm : Form
 
         isUpdatingUI = true;
 
+        btnChangeFormInEditor.Visible = FormDatabase.HasFormsOrParadox(p.InternalSpecies, AppRoot);
+
         txtNickname.Text = p.Nickname;
         numLevel.Value = Math.Min(100, Math.Max(1, p.Level));
         chkShiny.Checked = p.IsShiny;
         chkSuperShiny.Checked = p.IsSuperShiny;
 
         if (cbGender.Items.Contains(p.Gender)) cbGender.SelectedItem = p.Gender; else cbGender.SelectedIndex = 0;
-        if (cbNature.Items.Contains(p.Nature)) cbNature.SelectedItem = p.Nature; else cbNature.Text = p.Nature;
-        lblNatureInfo.Text = GetNatureEffect(p.InternalNature);
+        
+        string natDisp = GetNatureDisplayName(p.Nature, p.InternalNature);
+        if (cbNature.Items.Contains(natDisp)) cbNature.SelectedItem = natDisp; else cbNature.Text = natDisp;
+        UpdateStatColorsByNature();
         
         string realItemName = pbs.GetName(pbs.Items, p.InternalHeldItem, p.HeldItem);
         if (cbItem.Items.Contains(realItemName)) cbItem.SelectedItem = realItemName; else cbItem.Text = realItemName;
@@ -1197,6 +1388,11 @@ public class MainForm : Form
     {
         if (currentSaveData == null || string.IsNullOrEmpty(currentSavePath)) return;
 
+        lblStatus.Text = "⏳ Inyectando cambios en la partida... No cierres la ventana.";
+        lblStatus.ForeColor = Color.DarkOrange;
+        this.Cursor = Cursors.WaitCursor;
+        Application.DoEvents();
+
         try
         {
             ApplyCurrentEdits(); 
@@ -1236,6 +1432,10 @@ public class MainForm : Form
             lblStatus.ForeColor = Color.Red;
             LogError(ex, "BtnSave_Click");
         }
+        finally
+        {
+            this.Cursor = Cursors.Default;
+        }
     }
 
     private void BtnInfo_Click(object sender, EventArgs e)
@@ -1243,7 +1443,7 @@ public class MainForm : Form
         ApplyCurrentEdits();
         Pokemon p = GetCurrentPokemon();
         if (p == null) return;
-        InfoForm infoWindow = new InfoForm(p, picSprite.Image);
+        InfoForm infoWindow = new InfoForm(p, picSprite.Image, pbs);
         infoWindow.ShowDialog();
     }
 }
@@ -1289,10 +1489,10 @@ public class AddPokemonForm : Form
 
 public class InfoForm : Form
 {
-    public InfoForm(Pokemon p, Image sprite)
+    public InfoForm(Pokemon p, Image sprite, PBSReader pbs)
     {
         this.Text = $"Datos de {p.Nickname}";
-        this.Size = new Size(380, 500);
+        this.Size = new Size(400, 560);
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
@@ -1307,27 +1507,67 @@ public class InfoForm : Form
         Label lblLvl = new Label { Text = $"Nivel {p.Level}  •  {p.Gender}", Location = new Point(98, 55), Font = new Font("Segoe UI", 10), ForeColor = Color.DimGray, AutoSize = true };
         this.Controls.Add(lblLvl);
 
-        RichTextBox rtb = new RichTextBox 
+        string realNature = pbs.GetName(pbs.Natures, p.InternalNature, p.Nature);
+        string realBall = pbs.GetName(pbs.Items, p.PokeBall, p.PokeBall);
+        if (string.IsNullOrWhiteSpace(realBall)) realBall = "Poké Ball";
+
+        DataGridView dgv = new DataGridView 
         { 
-            Location = new Point(20, 100), Size = new Size(320, 340), ReadOnly = true, BackColor = Color.WhiteSmoke, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 10)
+            Location = new Point(20, 100), 
+            Size = new Size(345, 400), 
+            ReadOnly = true, 
+            AllowUserToAddRows = false, 
+            AllowUserToResizeRows = false,
+            AllowUserToResizeColumns = false,
+            RowHeadersVisible = false, 
+            ColumnHeadersVisible = false,
+            BackgroundColor = Color.White, 
+            BorderStyle = BorderStyle.None, 
+            CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+            GridColor = Color.LightGray,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            Font = new Font("Segoe UI", 10F),
+            ScrollBars = ScrollBars.Vertical
         };
 
-        rtb.Text = $" Especie:\t\t{p.Species} (ID: {p.PersonalID})\n" +
-                   $" Forma Activa:\t{p.Form}\n" +
-                   $" Habilidad:\t\t{p.Ability}\n" +
-                   $" Naturaleza:\t{p.Nature}\n" +
-                   $" Objeto Equip.:\t{p.HeldItem}\n" +
-                   $" Pokéball:\t\t{p.PokeBall}\n" +
-                   $" Felicidad:\t\t{p.Happiness} / 255\n" +
-                   $" Experiencia:\t{p.Exp} EXP\n" +
-                   $" Forma Shiny:\t{(p.IsShiny ? "Sí" : "No")}\n" +
-                   $" Super Shiny:\t{(p.IsSuperShiny ? "Sí (Radiante)" : "No")}\n\n" +
-                   $" --- Datos de Captura ---\n" +
-                   $" Nivel Obtención:\tNv. {p.ObtainLevel}\n" +
-                   $" Mapa Obtención:\t{p.ObtainMap}\n" +
-                   (string.IsNullOrEmpty(p.ObtainText) ? "" : $" Nota:\t\t{p.ObtainText}");
+        dgv.DefaultCellStyle.SelectionBackColor = Color.White;
+        dgv.DefaultCellStyle.SelectionForeColor = Color.Black;
 
-        this.Controls.Add(rtb);
+        dgv.Columns.Add("Prop", "Prop");
+        dgv.Columns.Add("Val", "Val");
+        
+        dgv.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells;
+
+        dgv.Rows.Add("Especie", $"{p.Species} (ID: {p.PersonalID})");
+        dgv.Rows.Add("Forma Activa", FormDatabase.GetFormName(p.InternalSpecies, p.Form));
+        dgv.Rows.Add("Habilidad", p.Ability);
+        dgv.Rows.Add("Naturaleza", realNature);
+        dgv.Rows.Add("Objeto Equipo", string.IsNullOrEmpty(p.HeldItem) ? "Ninguno" : p.HeldItem);
+        dgv.Rows.Add("Poké Ball", realBall);
+        dgv.Rows.Add("Felicidad", $"{p.Happiness} / 255");
+        dgv.Rows.Add("Experiencia", $"{p.Exp:N0} EXP");
+        dgv.Rows.Add("Forma Shiny", p.IsShiny ? "⭐ Sí" : "No");
+        dgv.Rows.Add("Super Shiny", p.IsSuperShiny ? "🌟 Sí (Radiante)" : "No");
+        
+        int sepIdx = dgv.Rows.Add("[ DATOS DE CAPTURA ]", "");
+        dgv.Rows[sepIdx].DefaultCellStyle.BackColor = Color.WhiteSmoke;
+        dgv.Rows[sepIdx].DefaultCellStyle.ForeColor = Color.DimGray;
+        dgv.Rows[sepIdx].DefaultCellStyle.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+
+        dgv.Rows.Add("Nivel Obtención", $"Nv. {p.ObtainLevel}");
+        dgv.Rows.Add("Mapa Obtención", p.ObtainMap);
+        if (!string.IsNullOrEmpty(p.ObtainText)) dgv.Rows.Add("Nota", p.ObtainText);
+
+        foreach (DataGridViewRow row in dgv.Rows) {
+            row.Cells[0].Style.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            row.Cells[0].Style.ForeColor = Color.DarkSlateGray;
+            row.Height = 28;
+        }
+        dgv.Rows[sepIdx].Height = 24; 
+
+        dgv.ClearSelection();
+        this.Controls.Add(dgv);
     }
 }
 
@@ -1373,7 +1613,7 @@ public class ChangeFormDialog : Form
         string currentSpc = p.InternalSpecies?.ToUpper() ?? "";
         string[] currentGroup = null;
 
-        foreach (var group in MainForm.ParadoxGroups) {
+        foreach (var group in FormDatabase.ParadoxGroups) {
             if (group.Contains(currentSpc)) {
                 currentGroup = group;
                 break;
@@ -1396,7 +1636,7 @@ public class ChangeFormDialog : Form
         else 
         {
             cbOptions.Items.Add(new FormOption { 
-                DisplayName = "Forma Base (Normal)", 
+                DisplayName = "Forma Base", 
                 FormIndex = 0, 
                 SpeciesInternal = currentSpc 
             });
@@ -1412,7 +1652,7 @@ public class ChangeFormDialog : Form
                     File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}s.png")))
                 {
                     cbOptions.Items.Add(new FormOption { 
-                        DisplayName = $"Forma Alternativa {i} (Regional / Mega)", 
+                        DisplayName = FormDatabase.GetFormName(currentSpc, i), 
                         FormIndex = i, 
                         SpeciesInternal = currentSpc 
                     });
