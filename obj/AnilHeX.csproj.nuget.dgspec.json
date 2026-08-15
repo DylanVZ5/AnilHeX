@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX\\AnilHeX.csproj": {}
+    "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj": {}
   },
   "projects": {
-    "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX\\AnilHeX.csproj": {
+    "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX\\AnilHeX.csproj",
+        "projectUniqueName": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj",
         "projectName": "AnilHeX",
-        "projectPath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX\\AnilHeX.csproj",
+        "projectPath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj",
         "packagesPath": "C:\\Users\\gokug\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX\\obj\\",
+        "outputPath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\gokug\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -42,6 +42,14 @@
       "frameworks": {
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
+          "dependencies": {
+            "Microsoft.NET.ILLink.Tasks": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.29, )",
+              "autoReferenced": true
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -53,6 +61,20 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
+              "version": "[8.0.29, 8.0.29]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Runtime.win-x64",
+              "version": "[8.0.29, 8.0.29]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+              "version": "[8.0.29, 8.0.29]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
@@ -62,6 +84,11 @@
             }
           },
           "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.423/PortableRuntimeIdentifierGraph.json"
+        }
+      },
+      "runtimes": {
+        "win-x64": {
+          "#import": []
         }
       }
     }

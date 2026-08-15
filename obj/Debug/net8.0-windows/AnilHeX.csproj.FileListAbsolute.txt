@@ -12,3 +12,17 @@ C:\Users\gokug\OneDrive\Escritorio\AnilHeX\obj\Debug\net8.0-windows\refint\AnilH
 C:\Users\gokug\OneDrive\Escritorio\AnilHeX\obj\Debug\net8.0-windows\AnilHeX.pdb
 C:\Users\gokug\OneDrive\Escritorio\AnilHeX\obj\Debug\net8.0-windows\AnilHeX.genruntimeconfig.cache
 C:\Users\gokug\OneDrive\Escritorio\AnilHeX\obj\Debug\net8.0-windows\ref\AnilHeX.dll
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\bin\Debug\net8.0-windows\AnilHeX.exe
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\bin\Debug\net8.0-windows\AnilHeX.deps.json
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\bin\Debug\net8.0-windows\AnilHeX.runtimeconfig.json
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\bin\Debug\net8.0-windows\AnilHeX.dll
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\bin\Debug\net8.0-windows\AnilHeX.pdb
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.AssemblyInfoInputs.cache
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.AssemblyInfo.cs
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.csproj.CoreCompileInputs.cache
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.dll
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\refint\AnilHeX.dll
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.pdb
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\AnilHeX.genruntimeconfig.cache
+C:\Users\gokug\OneDrive\Escritorio\AnilHeX desarrollo\obj\Debug\net8.0-windows\ref\AnilHeX.dll

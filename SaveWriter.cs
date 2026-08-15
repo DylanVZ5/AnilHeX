@@ -166,18 +166,18 @@ public class SaveWriter
         }
     }
 
-    public int GetMoney()
+    public long GetMoney()
     {
         RubyObject trainerObj = FindObjectByClass(_rootRubyData, "PokeBattle_Trainer") ?? FindObjectByClass(_rootRubyData, "Player");
         if (trainerObj != null && trainerObj.Attributes.ContainsKey("@money"))
         {
             object moneyObj = Unwrap(trainerObj.Get("@money"));
-            if (moneyObj != null) return Convert.ToInt32(moneyObj);
+            if (moneyObj != null) return Convert.ToInt64(moneyObj); // Usamos ToInt64 para billones
         }
         return 0;
     }
 
-    public void SyncMoney(int money)
+    public void SyncMoney(long money)
     {
         RubyObject trainerObj = FindObjectByClass(_rootRubyData, "PokeBattle_Trainer") ?? FindObjectByClass(_rootRubyData, "Player");
         if (trainerObj != null)
