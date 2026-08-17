@@ -4,6 +4,10 @@ using System.IO;
 using System.Windows.Forms;
 using System.Linq;
 using System.Collections.Generic;
+using System.Collections;
+using System.Text.RegularExpressions;
+using System.Globalization;
+using System.Threading;
 
 public class MainForm : Form
 {
@@ -19,7 +23,8 @@ public class MainForm : Form
     private Button btnPrevBox, btnNextBox, btnAddPokemon, btnBagAdd, btnBagRemove, btnInfo, btnLoad, btnSave, btnDescAbility, btnChangeFormInEditor, btnMaxPP;
     private ContextMenuStrip pokeMenu;
     private DataGridView[] dgvPockets = new DataGridView[9]; 
-    private NumericUpDown numBagQty, numMoney, numLevel;
+    private NumericUpDown numBagQty, numMoney, numLevel, numSaveSlot;
+    private Label lblSaveSlot;
     
     private GroupBox grpEditor;
     private PictureBox picSprite;
@@ -45,6 +50,12 @@ public class MainForm : Form
 
     public MainForm()
     {
+        // --- PARCHE DE IDIOMA PARA EVITAR QUE SE CORROMPA EL TIEMPO Y LAS COORDENADAS ---
+        Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+        Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
+        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+        CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+
         this.Text = "AñilHeX - Editor Maestro"; this.Size = new Size(840, 600); this.FormBorderStyle = FormBorderStyle.FixedSingle; this.MaximizeBox = false; this.StartPosition = FormStartPosition.CenterScreen; this.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         InitializeUI();
         pbs = new PBSReader(); string pbsPath = Path.Combine(AppRoot, "PBS"); if (Directory.Exists(pbsPath)) pbs.LoadPBSDirectory(pbsPath);
@@ -54,6 +65,12 @@ public class MainForm : Form
     {
         btnLoad = new Button { Text = "Abrir Partida...", Location = new Point(12, 10), Size = new Size(120, 30) }; btnLoad.Click += BtnLoad_Click; this.Controls.Add(btnLoad);
         btnSave = new Button { Text = "Guardar Cambios", Location = new Point(140, 10), Size = new Size(120, 30), Enabled = false, BackColor = Color.LightBlue }; btnSave.Click += BtnSave_Click; this.Controls.Add(btnSave);
+
+        // --- SISTEMA DE NÚMERO DE PARTIDA (SAVE SLOT) ---
+        lblSaveSlot = new Label { Text = "Nº Partida:", Location = new Point(275, 15), AutoSize = true, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), ForeColor = Color.DarkSlateGray };
+        this.Controls.Add(lblSaveSlot);
+        numSaveSlot = new NumericUpDown { Location = new Point(355, 13), Size = new Size(50, 25), Minimum = 1, Maximum = 999, Value = 1, Enabled = false, Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
+        this.Controls.Add(numSaveSlot);
 
         tabMain = new TabControl { Location = new Point(12, 50), Size = new Size(390, 490), AllowDrop = true };
         tabMain.SelectedIndexChanged += (s, e) => { if (tabMain.SelectedTab == tabBag) UpdateBagItemDropdown(); };
@@ -93,7 +110,7 @@ public class MainForm : Form
         Button btnBagAddAll = new Button { Location = new Point(170, 332), Size = new Size(200, 27), Text = "Inyectar Todos los del Juego", BackColor = Color.Plum }; btnBagAddAll.Click += BtnBagAddAll_Click; tabBag.Controls.Add(btnBagAddAll);
         btnBagRemove = new Button { Location = new Point(5, 364), Size = new Size(365, 27), Text = "Borrar Objeto Seleccionado", BackColor = Color.LightCoral }; btnBagRemove.Click += BtnBagRemove_Click; tabBag.Controls.Add(btnBagRemove);
         
-        // --- DINERO EN MOCHILA ---
+        // Control de Dinero en la Mochila
         Label lblMoney = new Label { Text = "Dinero en Billetera:", Location = new Point(5, 415), AutoSize = true, Font = new Font("Segoe UI", 10.5F, FontStyle.Bold), ForeColor = Color.DarkSlateGray };
         numMoney = new NumericUpDown { Location = new Point(155, 413), Size = new Size(140, 25), Minimum = 0, Maximum = 9999999999m, ThousandsSeparator = true, Font = new Font("Segoe UI", 10.5F, FontStyle.Bold) };
         tabBag.Controls.Add(lblMoney);
@@ -139,6 +156,137 @@ public class MainForm : Form
 
         lblStatus = new Label { Location = new Point(12, 540), Size = new Size(810, 20), Text = "Esperando...", ForeColor = Color.Gray };
         this.Controls.Add(lblStatus);
+    }
+
+    // --- MÉTODOS DE EXTRACCIÓN Y LECTURA SEGUROS ---
+    private object Unwrap(object obj) { if (obj == null) return null; if (obj.GetType().Name == "RubyWrapper") { dynamic wrapper = obj; return wrapper.WrappedObject; } return obj; }
+
+    private dynamic FindObjectByClassName(object node, string targetClass, HashSet<object> visited = null) {
+        visited ??= new HashSet<object>();
+        if (node == null || visited.Contains(node)) return null;
+        visited.Add(node);
+
+        node = Unwrap(node);
+        if (node == null) return null;
+
+        var type = node.GetType();
+        if (type.Name == "RubyObject") {
+            dynamic ro = node;
+            if (ro.ClassName == targetClass) return ro;
+            if (ro.Attributes != null) {
+                foreach (var val in ro.Attributes.Values) {
+                    var found = FindObjectByClassName(val, targetClass, visited);
+                    if (found != null) return found;
+                }
+            }
+        }
+        else if (node is IList list) {
+            foreach (var item in list) { var found = FindObjectByClassName(item, targetClass, visited); if (found != null) return found; }
+        }
+        else if (node is IDictionary dict) {
+            foreach (var item in dict.Values) { var found = FindObjectByClassName(item, targetClass, visited); if (found != null) return found; }
+        }
+        return null;
+    }
+
+    private long GetMoneySafely() {
+        try {
+            dynamic trainer = FindObjectByClassName(currentSaveData.RootData, "PokeBattle_Trainer") ?? FindObjectByClassName(currentSaveData.RootData, "Player");
+            if (trainer != null && trainer.Attributes != null && trainer.Attributes.ContainsKey("@money")) {
+                object rawMoney = Unwrap(trainer.Attributes["@money"]);
+                if (rawMoney != null) {
+                    string strVal = rawMoney.ToString();
+                    if (long.TryParse(strVal, out long val)) return val;
+                    return 9999999999L; // Límite seguro
+                }
+            }
+        } catch { }
+        return 0;
+    }
+
+    private void SyncMoneySafely(long newMoney) {
+        try {
+            dynamic trainer = FindObjectByClassName(currentSaveData.RootData, "PokeBattle_Trainer") ?? FindObjectByClassName(currentSaveData.RootData, "Player");
+            if (trainer != null && trainer.Attributes != null) {
+                trainer.Attributes["@money"] = newMoney;
+            }
+        } catch { }
+    }
+
+    // Escáner Quirúrgico: Modifica número de partida respetando prefijos.
+    private void UpdateInternalSaveSlot(object node, int currentSlot, int newSlot, HashSet<object> visited = null) {
+        visited ??= new HashSet<object>();
+        if (node == null || visited.Contains(node)) return;
+        visited.Add(node);
+
+        node = Unwrap(node);
+        if (node == null) return;
+
+        string currentStr = currentSlot.ToString();
+        string newStr = newSlot.ToString();
+
+        var type = node.GetType();
+        if (type.Name == "RubyObject") {
+            dynamic ro = node;
+            if (ro.Attributes != null) {
+                string[] safeAttrs = { "@saveSlot", "@save_slot", "@saveFile", "@save_file", "@saveIndex", "@save_index", "@current_save_slot", "@title", "@name" };
+                foreach (string attr in safeAttrs) {
+                    if (ro.Attributes.ContainsKey(attr)) {
+                        object orig = Unwrap(ro.Attributes[attr]);
+                        
+                        if (orig is string strVal) {
+                            if (strVal.Contains("Partida " + currentStr)) ro.Attributes[attr] = strVal.Replace("Partida " + currentStr, "Partida " + newStr);
+                            else if (strVal.Contains("Game " + currentStr)) ro.Attributes[attr] = strVal.Replace("Game " + currentStr, "Game " + newStr);
+                            else if (strVal == currentStr) ro.Attributes[attr] = newStr;
+                        }
+                        else if (orig is int || orig is long || orig is System.Numerics.BigInteger) {
+                            if (orig.ToString() == currentStr) {
+                                ro.Attributes[attr] = newSlot;
+                            }
+                        }
+                        else if (orig is byte[] byteVal) {
+                            string strBytes = System.Text.Encoding.UTF8.GetString(byteVal);
+                            if (strBytes.Contains("Partida " + currentStr)) ro.Attributes[attr] = System.Text.Encoding.UTF8.GetBytes(strBytes.Replace("Partida " + currentStr, "Partida " + newStr));
+                            else if (strBytes.Contains("Game " + currentStr)) ro.Attributes[attr] = System.Text.Encoding.UTF8.GetBytes(strBytes.Replace("Game " + currentStr, "Game " + newStr));
+                            else if (strBytes == currentStr) ro.Attributes[attr] = System.Text.Encoding.UTF8.GetBytes(newStr);
+                        }
+                    }
+                }
+                foreach (var val in ro.Attributes.Values) UpdateInternalSaveSlot(val, currentSlot, newSlot, visited);
+            }
+        }
+        else if (node is IList list) {
+            foreach (var item in list) UpdateInternalSaveSlot(item, currentSlot, newSlot, visited);
+        }
+        else if (node is IDictionary dict) {
+            var keysToUpdate = new List<object>();
+            foreach (DictionaryEntry entry in dict) {
+                string k = Unwrap(entry.Key)?.ToString()?.Replace(":", "")?.Replace("@", "")?.Trim() ?? "";
+                if (k == "saveSlot" || k == "save_slot" || k == "saveFile" || k == "save_file" || k == "saveIndex" || k == "save_index" || k == "current_save_slot" || k == "title" || k == "name") {
+                    keysToUpdate.Add(entry.Key);
+                }
+                UpdateInternalSaveSlot(entry.Value, currentSlot, newSlot, visited);
+            }
+            foreach (var key in keysToUpdate) {
+                object orig = Unwrap(dict[key]);
+                if (orig is string strVal) {
+                    if (strVal.Contains("Partida " + currentStr)) dict[key] = strVal.Replace("Partida " + currentStr, "Partida " + newStr);
+                    else if (strVal.Contains("Game " + currentStr)) dict[key] = strVal.Replace("Game " + currentStr, "Game " + newStr);
+                    else if (strVal == currentStr) dict[key] = newStr;
+                }
+                else if (orig is byte[] byteVal) {
+                    string strBytes = System.Text.Encoding.UTF8.GetString(byteVal);
+                    if (strBytes.Contains("Partida " + currentStr)) dict[key] = System.Text.Encoding.UTF8.GetBytes(strBytes.Replace("Partida " + currentStr, "Partida " + newStr));
+                    else if (strBytes.Contains("Game " + currentStr)) dict[key] = System.Text.Encoding.UTF8.GetBytes(strBytes.Replace("Game " + currentStr, "Game " + newStr));
+                    else if (strBytes == currentStr) dict[key] = System.Text.Encoding.UTF8.GetBytes(newStr);
+                }
+                else if (orig is int || orig is long || orig is System.Numerics.BigInteger) {
+                    if (orig.ToString() == currentStr) {
+                        dict[key] = newSlot;
+                    }
+                }
+            }
+        }
     }
 
     // --- EVENTOS DE INTERFAZ ---
@@ -192,18 +340,39 @@ public class MainForm : Form
         } catch (Exception ex) { LogError(ex, "ApplyCurrentEdits"); } finally { isUpdatingUI = false; }
     }
 
-    private void BtnLoad_Click(object sender, EventArgs e) { string appDataRoaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData); string[] possibleFolders = { Path.Combine(appDataRoaming, "Pokemon Anil"), Path.Combine(appDataRoaming, "Pokémon Añil"), Path.Combine(appDataRoaming, "PokemonAnil") }; string initialDir = possibleFolders.FirstOrDefault(Directory.Exists) ?? appDataRoaming; using (OpenFileDialog ofd = new OpenFileDialog { Title = "Seleccionar Partida (.rxdata)", Filter = "Partidas (*.rxdata)|*.rxdata|Todos (*.*)|*.*", InitialDirectory = initialDir, RestoreDirectory = true }) { if (ofd.ShowDialog() == DialogResult.OK) { currentSavePath = ofd.FileName; LoadSaveFile(); } } }
+    private void BtnLoad_Click(object sender, EventArgs e) { 
+        string appDataRoaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData); 
+        string[] possibleFolders = { Path.Combine(appDataRoaming, "Pokemon Anil"), Path.Combine(appDataRoaming, "Pokémon Añil"), Path.Combine(appDataRoaming, "PokemonAnil") }; 
+        string initialDir = possibleFolders.FirstOrDefault(Directory.Exists) ?? appDataRoaming; 
+        using (OpenFileDialog ofd = new OpenFileDialog { Title = "Seleccionar Partida (.rxdata)", Filter = "Partidas (*.rxdata)|*.rxdata|Todos (*.*)|*.*", InitialDirectory = initialDir, RestoreDirectory = true }) { 
+            if (ofd.ShowDialog() == DialogResult.OK) { 
+                currentSavePath = ofd.FileName; 
+                LoadSaveFile(); 
+            } 
+        } 
+    }
 
     private void LoadSaveFile() {
         lblStatus.Text = "⏳ Cargando partida y leyendo base de datos... ¡Un momento!"; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents();
         try {
             SaveParser parser = new SaveParser(currentSavePath, pbs); currentSaveData = parser.ParseSave(); isUpdatingUI = true; 
+            
+            // Extraer Nº de partida del nombre de archivo
+            string fName = Path.GetFileNameWithoutExtension(currentSavePath);
+            var match = Regex.Match(fName, @"\d+");
+            if (match.Success && int.TryParse(match.Value, out int slotNumber)) {
+                numSaveSlot.Value = Math.Min(numSaveSlot.Maximum, Math.Max(numSaveSlot.Minimum, slotNumber));
+            } else {
+                numSaveSlot.Value = 1;
+            }
+            numSaveSlot.Enabled = true;
+
             cbBoxSelector.Items.Clear(); foreach (var box in currentSaveData.Boxes) cbBoxSelector.Items.Add($"{box.Name} (Caja {box.BoxIndex})"); 
             foreach (var grid in dgvPockets) grid?.Rows.Clear(); 
             foreach (var item in currentSaveData.Bag) { int pId = item.Pocket >= 1 && item.Pocket <= 8 ? item.Pocket : 1; string realName = pbs != null ? pbs.GetName(pbs.Items, item.InternalName, item.Name) : item.Name; dgvPockets[pId]?.Rows.Add(item.InternalName, realName, item.Quantity); }
             
-            SaveWriter tempWriter = new SaveWriter(currentSavePath, currentSaveData.RootData);
-            numMoney.Value = Math.Min(numMoney.Maximum, Math.Max(0m, (decimal)tempWriter.GetMoney()));
+            long safeMoney = GetMoneySafely();
+            numMoney.Value = Math.Min(numMoney.Maximum, Math.Max(0m, (decimal)safeMoney));
 
             if (pbs.IsLoaded) { cbNature.Items.Clear(); foreach (var natKvp in pbs.Natures) { string disp = PokemonUtils.GetNatureDisplayName(natKvp.Value, natKvp.Key); if (!cbNature.Items.Contains(disp)) cbNature.Items.Add(disp); } cbAbility.Items.Clear(); cbAbility.Items.AddRange(pbs.Abilities.Values.Distinct().ToArray()); cbItem.Items.Clear(); var allItemsList = pbs.Items.Select(x => pbs.GetName(pbs.Items, x.Key, x.Value)).Distinct().ToArray(); cbItem.Items.AddRange(allItemsList); var allMoves = pbs.Moves.Values.Distinct().ToArray(); foreach (var cb in cbMoves) { cb.Items.Clear(); cb.Items.AddRange(allMoves); } }
             isUpdatingUI = false; if (cbBoxSelector.Items.Count > 0) cbBoxSelector.SelectedIndex = 0; 
@@ -224,12 +393,63 @@ public class MainForm : Form
 
     private void BtnSave_Click(object sender, EventArgs e) {
         if (currentSaveData == null || string.IsNullOrEmpty(currentSavePath)) return;
+        
+        int targetSlot = (int)numSaveSlot.Value;
+        string dir = Path.GetDirectoryName(currentSavePath);
+        string originalFileName = Path.GetFileName(currentSavePath);
+        
+        int currentSlot = 1;
+        var match = Regex.Match(originalFileName, @"\d+");
+        if (match.Success) int.TryParse(match.Value, out currentSlot);
+
+        string newFileName = originalFileName;
+        if (match.Success) {
+            newFileName = originalFileName.Substring(0, match.Index) + targetSlot.ToString() + originalFileName.Substring(match.Index + match.Length);
+        } else {
+            newFileName = $"Game_{targetSlot}.rxdata"; 
+        }
+
+        string targetPath = Path.Combine(dir, newFileName);
+
+        if (targetSlot != currentSlot) { 
+            if (File.Exists(targetPath)) { 
+                var res = MessageBox.Show($"Ya existe una partida guardada en la ranura {targetSlot} ({newFileName}).\n\n¿Deseas reemplazarla?", "Atención", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (res == DialogResult.No) { 
+                    lblStatus.Text = "Guardado cancelado por el usuario."; 
+                    lblStatus.ForeColor = Color.DarkOrange; 
+                    return; 
+                }
+            }
+        }
+
         lblStatus.Text = "⏳ Inyectando cambios en la partida... No cierres la ventana."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents();
         try {
             ApplyCurrentEdits(); currentSaveData.Bag.Clear();
             for (int pId = 1; pId <= 8; pId++) { foreach (DataGridViewRow row in dgvPockets[pId].Rows) { if (row.Cells[0].Value != null) { currentSaveData.Bag.Add(new ItemSlot { InternalName = row.Cells[0].Value.ToString(), Name = row.Cells[1].Value.ToString(), Quantity = Convert.ToInt32(row.Cells[2].Value), Pocket = pId }); } } }
-            SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData); writer.SyncBag(currentSaveData.Bag); writer.SyncMoney((long)numMoney.Value);
-            if (writer.Save()) { lblStatus.Text = "¡Partida guardada correctamente! Se han inyectado todas las modificaciones."; lblStatus.ForeColor = Color.Blue; }
+            
+            // Inyectar el número de forma quirúrgica sin tocar otras cadenas de texto
+            UpdateInternalSaveSlot(currentSaveData.RootData, currentSlot, targetSlot);
+
+            if (targetSlot != currentSlot) {
+                try {
+                    var datFiles = Directory.GetFiles(dir, $"*Partida_{currentSlot}.dat");
+                    foreach (var file in datFiles) {
+                        string newFile = file.Replace($"Partida_{currentSlot}.dat", $"Partida_{targetSlot}.dat");
+                        File.Copy(file, newFile, true);
+                    }
+                    string tmNuevo = Path.Combine(dir, $"tm_compatibility_Partida_{targetSlot}.dat");
+                    if (!File.Exists(tmNuevo)) {
+                        string tmBase = Path.Combine(dir, "tm_compatibility.dat");
+                        if (File.Exists(tmBase)) File.Copy(tmBase, tmNuevo, true);
+                    }
+                } catch (Exception ex) { LogError(ex, "Copiando archivos .dat"); }
+            }
+
+            currentSavePath = targetPath;
+            SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData); writer.SyncBag(currentSaveData.Bag); 
+            SyncMoneySafely((long)numMoney.Value);
+            
+            if (writer.Save()) { lblStatus.Text = $"¡Partida guardada correctamente como {newFileName}!"; lblStatus.ForeColor = Color.Blue; }
         } catch (Exception ex) { lblStatus.Text = $"Error crítico al guardar. Revisa errorlog.txt"; lblStatus.ForeColor = Color.Red; LogError(ex, "BtnSave_Click"); } finally { this.Cursor = Cursors.Default; }
     }
 

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj": {}
+    "C:\\Users\\gokug\\OneDrive\\Documentos\\GitHub\\AnilHeX\\AnilHeX.csproj": {}
   },
   "projects": {
-    "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj": {
+    "C:\\Users\\gokug\\OneDrive\\Documentos\\GitHub\\AnilHeX\\AnilHeX.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj",
+        "projectUniqueName": "C:\\Users\\gokug\\OneDrive\\Documentos\\GitHub\\AnilHeX\\AnilHeX.csproj",
         "projectName": "AnilHeX",
-        "projectPath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj",
+        "projectPath": "C:\\Users\\gokug\\OneDrive\\Documentos\\GitHub\\AnilHeX\\AnilHeX.csproj",
         "packagesPath": "C:\\Users\\gokug\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\obj\\",
+        "outputPath": "C:\\Users\\gokug\\OneDrive\\Documentos\\GitHub\\AnilHeX\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\gokug\\AppData\\Roaming\\NuGet\\NuGet.Config"

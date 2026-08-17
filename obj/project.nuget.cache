@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "+zbfPe3XJbQ=",
+  "dgSpecHash": "n1qN2EIxBDI=",
   "success": true,
-  "projectFilePath": "C:\\Users\\gokug\\OneDrive\\Escritorio\\AnilHeX desarrollo\\AnilHeX.csproj",
+  "projectFilePath": "C:\\Users\\gokug\\OneDrive\\Documentos\\GitHub\\AnilHeX\\AnilHeX.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\gokug\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.29\\microsoft.net.illink.tasks.8.0.29.nupkg.sha512",
     "C:\\Users\\gokug\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.29\\microsoft.netcore.app.runtime.win-x64.8.0.29.nupkg.sha512",
