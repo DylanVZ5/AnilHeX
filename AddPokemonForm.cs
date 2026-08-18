@@ -21,7 +21,6 @@ public class AddPokemonForm : Form
         this.Controls.Add(lbl1);
 
         ComboBox cbSpecies = new ComboBox { Location = new Point(90, 18), Size = new Size(170, 23), AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems };
-        cbSpecies.TextUpdate += (s, e) => { if (cbSpecies.DroppedDown) cbSpecies.DroppedDown = false; };
         cbSpecies.Items.AddRange(pbs.Species.Values.ToArray());
         if (cbSpecies.Items.Count > 0) cbSpecies.SelectedIndex = 0;
         this.Controls.Add(cbSpecies);
@@ -29,14 +28,26 @@ public class AddPokemonForm : Form
         Label lbl2 = new Label { Text = "Nivel:", Location = new Point(20, 60), Size = new Size(60, 20) };
         this.Controls.Add(lbl2);
 
-        NumericUpDown numLvl = new NumericUpDown { Location = new Point(90, 58), Size = new Size(60, 23), Minimum = 1, Maximum = 100, Value = 50 };
+        // AQUÍ ESTÁ EL CAMBIO: Empieza en Nivel 1 por defecto en lugar de 50
+        NumericUpDown numLvl = new NumericUpDown { Location = new Point(90, 58), Size = new Size(60, 23), Minimum = 1, Maximum = 100, Value = 1 };
         this.Controls.Add(numLvl);
 
-        Button btnOk = new Button { Text = "Añadir", Location = new Point(90, 110), Size = new Size(80, 30), DialogResult = DialogResult.OK };
+        Button btnOk = new Button { Text = "Añadir", Location = new Point(90, 110), Size = new Size(80, 30) };
         btnOk.Click += (s, e) => {
-            SelectedSpeciesName = cbSpecies.Text;
-            SelectedSpeciesInternal = pbs.Species.FirstOrDefault(x => x.Value.Equals(SelectedSpeciesName, StringComparison.OrdinalIgnoreCase)).Key ?? SelectedSpeciesName.ToUpper();
-            Level = (int)numLvl.Value;
+            string input = cbSpecies.Text.Trim();
+            
+            // Buscador flexible (Ignora si el usuario escribe en minúsculas)
+            var match = pbs.Species.FirstOrDefault(x => x.Value.Equals(input, StringComparison.OrdinalIgnoreCase) || x.Key.Equals(input, StringComparison.OrdinalIgnoreCase));
+            
+            if (match.Key != null) {
+                SelectedSpeciesName = match.Value;
+                SelectedSpeciesInternal = match.Key.ToUpper(); // Fuerza SIEMPRE a mayúsculas para evitar crasheos en Ruby
+                Level = (int)numLvl.Value;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            } else {
+                MessageBox.Show("No se encontró esa especie. Escribe un nombre válido o selecciónalo de la lista.", "Especie inválida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         };
         this.Controls.Add(btnOk);
     }

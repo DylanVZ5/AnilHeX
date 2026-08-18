@@ -24,6 +24,9 @@ public class PBSReader
     // NUEVO: Diccionario para saber la habilidad por defecto del Pokémon
     public Dictionary<string, string> SpeciesAbilities { get; private set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); 
 
+    public Dictionary<string, List<string>> Evolutions { get; private set; } = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> PreEvolutions { get; private set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
     public bool IsLoaded => Abilities.Count > 0 || Moves.Count > 0 || Items.Count > 0 || Species.Count > 0;
 
     public bool LoadPBSDirectory(string pbsFolderPath)
@@ -35,7 +38,16 @@ public class PBSReader
         if (File.Exists(Path.Combine(pbsFolderPath, "moves.txt"))) ParsePBSFile(Path.Combine(pbsFolderPath, "moves.txt"), Moves, MoveDescriptions, MovePPs);
         
         // Usamos el parseador exclusivo para sacar los datos de los Pokémon
-        if (File.Exists(Path.Combine(pbsFolderPath, "pokemon.txt"))) ParsePBSPokemon(Path.Combine(pbsFolderPath, "pokemon.txt")); 
+        if (File.Exists(Path.Combine(pbsFolderPath, "pokemon.txt"))) {
+            ParsePBSPokemon(Path.Combine(pbsFolderPath, "pokemon.txt")); 
+            
+            // CONSTRUIR EL ÁRBOL DE PRE-EVOLUCIONES
+            foreach (var kvp in Evolutions) {
+                foreach (var evo in kvp.Value) {
+                    PreEvolutions[evo] = kvp.Key;
+                }
+            }
+        } 
         
         if (File.Exists(Path.Combine(pbsFolderPath, "natures.txt"))) ParsePBSFile(Path.Combine(pbsFolderPath, "natures.txt"), Natures);
 
@@ -107,6 +119,15 @@ public class PBSReader
                 {
                     // Si tiene varias habilidades separadas por coma, nos quedamos solo con la primera
                     SpeciesAbilities[currentId] = val.Split(',')[0].Trim(); 
+                }
+                else if (key.Equals("Evolutions", StringComparison.OrdinalIgnoreCase)) 
+                {
+                    string[] evData = val.Split(',');
+                    List<string> evos = new List<string>();
+                    for (int i = 0; i < evData.Length; i += 3) {
+                        if (!string.IsNullOrWhiteSpace(evData[i])) evos.Add(evData[i].Trim().ToUpper());
+                    }
+                    Evolutions[currentId] = evos;
                 }
             }
         }

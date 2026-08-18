@@ -7,11 +7,13 @@ public class SaveWriter
 {
     private readonly string _savePath;
     private readonly object _rootRubyData;
+    private readonly PBSReader _pbs; // NUEVO
 
-    public SaveWriter(string savePath, object rootRubyData) 
+    public SaveWriter(string savePath, object rootRubyData, PBSReader pbs = null) 
     { 
         _savePath = savePath; 
-        _rootRubyData = rootRubyData; 
+        _rootRubyData = rootRubyData;
+        _pbs = pbs;
     }
 
     public bool Save()
@@ -58,7 +60,8 @@ public class SaveWriter
         if (templatePoke == null) return false;
 
         RubyObject newPoke = (RubyObject)CloneRubyObject(templatePoke);
-        newPoke.Set("@species", new RubySymbol(internalSpecies));
+        
+        newPoke.Set("@species", new RubySymbol(internalSpecies.ToUpper()));
         
         newPoke.Set("@name", null);
         
@@ -68,18 +71,27 @@ public class SaveWriter
         if (newPoke.Attributes.ContainsKey("@superShiny")) newPoke.Set("@superShiny", false);
         else newPoke.Set("@super_shiny", false);
         
+        // LIMPIEZA PROFUNDA DEL POKÉMON MOLDE
+        newPoke.Attributes.Remove("@calc_level");
+        newPoke.Attributes.Remove("@calc_stats");
+        newPoke.Attributes.Remove("@nature_for_stats");
+        newPoke.Attributes.Remove("@calc_nature");
+        
+        // FIX CRÍTICO: El juego necesita un HP base para no crashear la barra de vida en el PC
+        newPoke.Set("@hp", 10);
+        newPoke.Set("@totalhp", 10);
+        
         UpdateStatsAttribute(newPoke, "@iv", "@ivs", new int[] { 0, 0, 0, 0, 0, 0 });
         UpdateStatsAttribute(newPoke, "@ev", "@evs", new int[] { 0, 0, 0, 0, 0, 0 });
         
-        // --- DECODIFICADOR DE RANURAS AL CREAR ---
         if (string.IsNullOrEmpty(defaultAbility) || defaultAbility.StartsWith("AUTO")) 
         {
             newPoke.Set("@ability", null);
             if (newPoke.Attributes.ContainsKey("@ability_id")) newPoke.Set("@ability_id", null);
             
-            int index = 0; // Ranura 1 por defecto
+            int index = 0; 
             if (defaultAbility == "AUTO_1") index = 1;
-            else if (defaultAbility == "AUTO_2") index = 2; // Oculta
+            else if (defaultAbility == "AUTO_2") index = 2; 
 
             newPoke.Set("@ability_index", index); 
             if (index == 2) newPoke.Set("@hiddenAbility", true);
@@ -87,7 +99,7 @@ public class SaveWriter
         }
         else 
         {
-            RubySymbol defaultAbilitySym = new RubySymbol(defaultAbility);
+            RubySymbol defaultAbilitySym = new RubySymbol(defaultAbility.ToUpper());
             newPoke.Set("@ability", defaultAbilitySym);
             if (newPoke.Attributes.ContainsKey("@ability_id")) newPoke.Set("@ability_id", defaultAbilitySym);
             newPoke.Attributes.Remove("@ability_index");
@@ -95,8 +107,15 @@ public class SaveWriter
             newPoke.Attributes.Remove("@hiddenAbility");
         }
 
-        newPoke.Set("@nature", new RubySymbol("HARDY"));
-        if (newPoke.Attributes.ContainsKey("@initial_nature")) newPoke.Set("@initial_nature", new RubySymbol("HARDY"));
+        object templateNat = templatePoke.Get("@nature") ?? templatePoke.Get("@initial_nature");
+        if (templateNat is RubySymbol) {
+            newPoke.Set("@nature", new RubySymbol("HARDY"));
+            if (newPoke.Attributes.ContainsKey("@initial_nature")) newPoke.Set("@initial_nature", new RubySymbol("HARDY"));
+        } else {
+            newPoke.Set("@nature", 0); 
+            if (newPoke.Attributes.ContainsKey("@initial_nature")) newPoke.Set("@initial_nature", 0);
+        }
+
         newPoke.Set("@happiness", 70);
         newPoke.Set("@form", 0);
         newPoke.Set("@item", null); 
@@ -204,6 +223,17 @@ public class SaveWriter
         }
     }
 
+    private int GetNatureId(string nat) {
+        switch(nat?.ToUpper()) {
+            case "HARDY": return 0; case "LONELY": return 1; case "BRAVE": return 2; case "ADAMANT": return 3; case "NAUGHTY": return 4;
+            case "BOLD": return 5; case "DOCILE": return 6; case "RELAXED": return 7; case "IMPISH": return 8; case "LAX": return 9;
+            case "TIMID": return 10; case "HASTY": return 11; case "SERIOUS": return 12; case "JOLLY": return 13; case "NAIVE": return 14;
+            case "MODEST": return 15; case "MILD": return 16; case "QUIET": return 17; case "BASHFUL": return 18; case "RASH": return 19;
+            case "CALM": return 20; case "GENTLE": return 21; case "SASSY": return 22; case "CAREFUL": return 23; case "QUIRKY": return 24;
+            default: return 0; 
+        }
+    }
+
     public void SyncPokemon(Pokemon p, bool isParty, int boxIndex, int slotIndex)
     {
         RubyObject pokeRo = GetPokemonRubyObject(isParty, boxIndex, slotIndex);
@@ -223,11 +253,17 @@ public class SaveWriter
         }
         
         pokeRo.Set("@form", p.Form);
-        pokeRo.Set("@species", new RubySymbol(p.InternalSpecies));
+        pokeRo.Set("@species", new RubySymbol(p.InternalSpecies.ToUpper())); 
 
         pokeRo.Set("@level", p.Level);
         pokeRo.Set("@exp", p.Exp);
         pokeRo.Set("@happiness", p.Happiness);
+        
+        // LIMPIEZA DE CORRUPCIÓN POR POKÉMON
+        pokeRo.Attributes.Remove("@calc_level");
+        pokeRo.Attributes.Remove("@nature_for_stats");
+        pokeRo.Attributes.Remove("@calc_nature");
+        pokeRo.Attributes.Remove("@calc_stats");
         
         int genderVal = 0; 
         if (!string.IsNullOrEmpty(p.Gender)) {
@@ -244,19 +280,25 @@ public class SaveWriter
         if (string.IsNullOrWhiteSpace(p.InternalHeldItem) || p.InternalHeldItem.Equals("Ninguno", StringComparison.OrdinalIgnoreCase))
             pokeRo.Set("@item", null); 
         else 
-            pokeRo.Set("@item", new RubySymbol(p.InternalHeldItem));
+            pokeRo.Set("@item", new RubySymbol(p.InternalHeldItem.ToUpper())); 
 
-        if (!string.IsNullOrEmpty(p.InternalNature)) pokeRo.Set("@nature", new RubySymbol(p.InternalNature));
+        if (!string.IsNullOrEmpty(p.InternalNature)) {
+            object oldNat = pokeRo.Get("@nature") ?? pokeRo.Get("@initial_nature");
+            if (oldNat is RubySymbol) {
+                pokeRo.Set("@nature", new RubySymbol(p.InternalNature.ToUpper()));
+            } else {
+                pokeRo.Set("@nature", GetNatureId(p.InternalNature)); 
+            }
+        }
 
-        // --- DECODIFICADOR DE RANURAS AL EDITAR ---
         if (string.IsNullOrEmpty(p.InternalAbility) || p.InternalAbility.StartsWith("AUTO")) 
         {
             pokeRo.Set("@ability", null);
             if (pokeRo.Attributes.ContainsKey("@ability_id")) pokeRo.Set("@ability_id", null);
             
-            int index = 0; // Ranura 1
-            if (p.InternalAbility == "AUTO_1") index = 1; // Ranura 2
-            else if (p.InternalAbility == "AUTO_2") index = 2; // Oculta
+            int index = 0; 
+            if (p.InternalAbility == "AUTO_1") index = 1; 
+            else if (p.InternalAbility == "AUTO_2") index = 2; 
 
             pokeRo.Set("@ability_index", index); 
             if (index == 2) pokeRo.Set("@hiddenAbility", true);
@@ -264,7 +306,7 @@ public class SaveWriter
         }
         else 
         {
-            RubySymbol abSym = new RubySymbol(p.InternalAbility);
+            RubySymbol abSym = new RubySymbol(p.InternalAbility.ToUpper());
             pokeRo.Set("@ability", abSym);
             if (pokeRo.Attributes.ContainsKey("@ability_id")) pokeRo.Set("@ability_id", abSym);
             
@@ -288,7 +330,7 @@ public class SaveWriter
             {
                 if (Unwrap(movesList[i]) is RubyObject mRo)
                 {
-                    mRo.Set("@id", new RubySymbol(p.Moves[i].InternalName));
+                    mRo.Set("@id", new RubySymbol(p.Moves[i].InternalName.ToUpper()));
                     mRo.Set("@pp", p.Moves[i].PP);
                     mRo.Set("@ppup", p.Moves[i].PPUp);
                 }
@@ -319,7 +361,31 @@ public class SaveWriter
         
         if (pokedex == null) return;
 
-        RubySymbol spcSym = new RubySymbol(internalSpecies.ToUpper());
+        if (_pbs != null) {
+            string current = internalSpecies.ToUpper();
+            // Buscar al ancestro más antiguo de la familia
+            while (_pbs.PreEvolutions.ContainsKey(current)) {
+                current = _pbs.PreEvolutions[current];
+            }
+            UnlockSpeciesRecursive(current, pokedex);
+        } else {
+            UnlockSingleSpecies(internalSpecies.ToUpper(), pokedex);
+        }
+    }
+
+    private void UnlockSpeciesRecursive(string species, RubyObject pokedex, HashSet<string> visited = null) {
+        visited ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (visited.Contains(species)) return;
+        visited.Add(species);
+
+        UnlockSingleSpecies(species, pokedex);
+        if (_pbs.Evolutions.TryGetValue(species, out var evos)) {
+            foreach(var evo in evos) UnlockSpeciesRecursive(evo, pokedex, visited);
+        }
+    }
+
+    private void UnlockSingleSpecies(string species, RubyObject pokedex) {
+        RubySymbol spcSym = new RubySymbol(species);
 
         var owned = Unwrap(pokedex.Get("@owned"));
         if (owned is IDictionary dictOwned) dictOwned[spcSym] = true;
