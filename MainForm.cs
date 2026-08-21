@@ -48,7 +48,8 @@ public class MainForm : Form
     private bool isRandomizedSave = false; 
     private class DragData { public bool IsParty; public int BoxIndex; public int SlotIndex; }
     private readonly string[] PocketNames = { "", "Objetos", "Medicinas", "Poké Balls", "MTs y MOs", "Bayas", "Mega Piedras", "Batalla", "Clave" };
-
+    // --- LÓGICA ---
+    private List<string> currentBagDropdownItems = new List<string>(); // MEMORIA DEL BUSCADOR
     public MainForm()
     {
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
@@ -104,7 +105,37 @@ public class MainForm : Form
         tabBag = new TabPage("Mochila"); tabBagPockets = new TabControl { Location = new Point(5, 5), Size = new Size(370, 290) }; tabBagPockets.SelectedIndexChanged += (s, e) => UpdateBagItemDropdown();
         for (int pId = 1; pId <= 8; pId++) { TabPage pTab = new TabPage(PocketNames[pId]); dgvPockets[pId] = new DataGridView { Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = true, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AllowUserToResizeRows = false, AllowUserToResizeColumns = false }; dgvPockets[pId].Columns.Add("InternalName", "ID"); dgvPockets[pId].Columns["InternalName"].Visible = false; dgvPockets[pId].Columns.Add("Name", "Objeto"); dgvPockets[pId].Columns["Name"].ReadOnly = true; dgvPockets[pId].Columns.Add("Quantity", "Cant."); dgvPockets[pId].Columns["Quantity"].Width = 60; if (pId == 4 || pId == 8) { dgvPockets[pId].Columns["Quantity"].ReadOnly = true; dgvPockets[pId].Columns["Quantity"].DefaultCellStyle.BackColor = Color.WhiteSmoke; } dgvPockets[pId].RowsRemoved += (s, e) => UpdateBagItemDropdown(); pTab.Controls.Add(dgvPockets[pId]); tabBagPockets.TabPages.Add(pTab); }
         tabBag.Controls.Add(tabBagPockets);
-        cbBagItems = new ComboBox { Location = new Point(5, 301), Size = new Size(160, 25), AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems }; cbBagItems.TextUpdate += (s, e) => { if (cbBagItems.DroppedDown) cbBagItems.DroppedDown = false; }; tabBag.Controls.Add(cbBagItems);
+
+        // --- 1. DOBLE CLIC PARA CAMBIAR MTs ---
+        dgvPockets[4].CellDoubleClick += (s, ev) => {
+            if (ev.RowIndex >= 0) {
+                string internalName = dgvPockets[4].Rows[ev.RowIndex].Cells[0].Value.ToString();
+                string currentDisplayName = dgvPockets[4].Rows[ev.RowIndex].Cells[1].Value.ToString();
+                ChangeTMMove(internalName, currentDisplayName, ev.RowIndex);
+            }
+        };
+
+        // --- 2. CLIC DERECHO PARA CAMBIAR MTs ---
+        ContextMenuStrip tmMenu = new ContextMenuStrip();
+        tmMenu.Items.Add("✏️ Cambiar Ataque de esta MT (Inyectar)").Click += (s, ev) => {
+            if (dgvPockets[4].SelectedRows.Count > 0) {
+                int rowIndex = dgvPockets[4].SelectedRows[0].Index;
+                string internalName = dgvPockets[4].Rows[rowIndex].Cells[0].Value.ToString();
+                string currentDisplayName = dgvPockets[4].Rows[rowIndex].Cells[1].Value.ToString();
+                ChangeTMMove(internalName, currentDisplayName, rowIndex);
+            }
+        };
+        dgvPockets[4].ContextMenuStrip = tmMenu;
+        // -------------------------------------
+        // Apagamos el AutoComplete nativo y le asignamos nuestro buscador dinámico
+        // CÓDIGO CORREGIDO PARA INITIALIZEUI
+        cbBagItems = new ComboBox { 
+            Location = new Point(5, 301), 
+            Size = new Size(160, 25),
+            AutoCompleteMode = AutoCompleteMode.None // ¡VITAL para evitar crasheos!
+        }; 
+        cbBagItems.TextUpdate += CbBagItems_TextUpdate; 
+        tabBag.Controls.Add(cbBagItems);     
         numBagQty = new NumericUpDown { Location = new Point(170, 301), Size = new Size(55, 25), Minimum = 1, Maximum = 999, Value = 1 }; tabBag.Controls.Add(numBagQty);
         btnBagAdd = new Button { Location = new Point(230, 300), Size = new Size(60, 27), Text = "Añadir", BackColor = Color.LightGreen }; btnBagAdd.Click += BtnBagAdd_Click; tabBag.Controls.Add(btnBagAdd);
         Button btnBagMaxSelected = new Button { Location = new Point(295, 300), Size = new Size(75, 27), Text = "+ Max Sel.", BackColor = Color.LightGreen }; btnBagMaxSelected.Click += BtnBagMaxSelected_Click; tabBag.Controls.Add(btnBagMaxSelected);
@@ -168,6 +199,42 @@ public class MainForm : Form
 
         lblStatus = new Label { Location = new Point(12, 540), Size = new Size(810, 20), Text = "Esperando...", ForeColor = Color.Gray };
         this.Controls.Add(lblStatus);
+    }
+
+    private void CbBagItems_TextUpdate(object sender, EventArgs e) {
+        // 1. Guardamos el texto y el cursor ANTES de tocar la lista
+        string searchText = cbBagItems.Text;
+        int cursorPos = cbBagItems.SelectionStart;
+
+        // 2. LA CURA: Cerramos el menú a la fuerza antes de limpiar la lista. 
+        // Esto evita que Windows intente buscar el texto en una lista vacía.
+        if (cbBagItems.DroppedDown) cbBagItems.DroppedDown = false;
+
+        // 3. Ahora sí, limpiamos con seguridad
+        cbBagItems.Items.Clear();
+
+        // 4. Filtramos y rellenamos
+        if (string.IsNullOrWhiteSpace(searchText)) {
+            cbBagItems.Items.AddRange(currentBagDropdownItems.ToArray());
+        } else {
+            var filtered = currentBagDropdownItems
+                .Where(x => x.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToArray();
+            
+            if (filtered.Length > 0) {
+                cbBagItems.Items.AddRange(filtered);
+            }
+        }
+
+        // 5. Devolvemos el texto a la caja (Windows ya no crasheará aquí)
+        cbBagItems.Text = searchText;
+        cbBagItems.SelectionStart = cursorPos;
+
+        // 6. Volvemos a abrir el menú SOLO si hay resultados
+        if (cbBagItems.Items.Count > 0 && !string.IsNullOrWhiteSpace(searchText)) {
+            cbBagItems.DroppedDown = true;
+            Cursor.Current = Cursors.Default;
+        }
     }
 
     // --- MÉTODOS DE UI RESTAURADOS ---
@@ -712,8 +779,6 @@ public class MainForm : Form
                         }
 
                         // EXORCISMO DE CORRUPCIÓN GLOBAL
-                        ro.Attributes.Remove("@nature_for_stats");
-                        ro.Attributes.Remove("@calc_nature");
                         ro.Attributes.Remove("@calc_stats");
                         ro.Attributes.Remove("@calc_level");
                     }
@@ -792,8 +857,105 @@ public class MainForm : Form
     private void BtnAddPokemon_Click(object sender, EventArgs e) { if (currentSaveData == null) return; int targetSlot = -1; for (int i = 0; i < 30; i++) { if (currentSaveData.Boxes[currentBoxIndex].Slots[i] == null) { targetSlot = i; break; } } if (targetSlot == -1) { MessageBox.Show("La caja actual está llena.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } using (AddPokemonForm form = new AddPokemonForm(pbs)) { if (form.ShowDialog() == DialogResult.OK) { lblStatus.Text = "⏳ Generando Pokémon e inyectando en la caja..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { ApplyCurrentEdits(); SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData, pbs); string intSpc = form.SelectedSpeciesInternal; string gr = pbs.SpeciesGrowthRates.ContainsKey(intSpc) ? pbs.SpeciesGrowthRates[intSpc] : "MEDIUMFAST"; int exactExp = PokemonUtils.CalculateExp(form.Level, gr); bool success = writer.AddPokemon(false, currentBoxIndex, intSpc, form.SelectedSpeciesName, form.Level, exactExp, "AUTO_0"); if (success) { ReloadFromMemory(); isEditingParty = false; currentSlotIndex = targetSlot; LoadPokemonToEditor(); lblStatus.Text = $"¡Pokémon añadido! Habilidad lista para el Modo Random."; lblStatus.ForeColor = Color.Green; } } finally { this.Cursor = Cursors.Default; } } } }
     private void BtnBoxChange_DragOver(object sender, DragEventArgs e) { if (e.Data.GetDataPresent(typeof(DragData)) && (DateTime.Now - lastBoxSwitch).TotalMilliseconds > 700) { Button btn = sender as Button; if (btn == btnNextBox && cbBoxSelector.SelectedIndex < cbBoxSelector.Items.Count - 1) cbBoxSelector.SelectedIndex++; else if (btn == btnPrevBox && cbBoxSelector.SelectedIndex > 0) cbBoxSelector.SelectedIndex--; lastBoxSwitch = DateTime.Now; } }
 
-    private void UpdateBagItemDropdown() { if (!pbs.IsLoaded || tabBagPockets.SelectedIndex < 0) return; int currentPocket = tabBagPockets.SelectedIndex + 1; if (dgvPockets[currentPocket] == null) return; string currentSelection = cbBagItems.Text; cbBagItems.Items.Clear(); HashSet<string> existingItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase); if (currentPocket == 4 || currentPocket == 8) { foreach (DataGridViewRow row in dgvPockets[currentPocket].Rows) { if (row.Cells[0].Value != null) existingItems.Add(row.Cells[0].Value.ToString()); } } foreach (var kvp in pbs.Items) { int pkt = pbs.ItemPockets.ContainsKey(kvp.Key) ? pbs.ItemPockets[kvp.Key] : 1; if (pkt == currentPocket && !existingItems.Contains(kvp.Key)) { cbBagItems.Items.Add(pbs.GetName(pbs.Items, kvp.Key, kvp.Value)); } } if (cbBagItems.Items.Contains(currentSelection)) cbBagItems.SelectedItem = currentSelection; else if (cbBagItems.Items.Count > 0) cbBagItems.SelectedIndex = 0; }
-    private void BtnBagAdd_Click(object sender, EventArgs e) { if (string.IsNullOrWhiteSpace(cbBagItems.Text)) return; string intId = PokemonUtils.GetInternalId(pbs.Items, cbBagItems.Text, "", pbs); if (string.IsNullOrEmpty(intId)) return; int pocket = tabBagPockets.SelectedIndex + 1; int qtyToAdd = (pocket == 4 || pocket == 8) ? 1 : (int)numBagQty.Value; foreach (DataGridViewRow row in dgvPockets[pocket].Rows) { if (qtyToAdd <= 0) break; if (row.Cells[0].Value != null && row.Cells[0].Value.ToString().Equals(intId, StringComparison.OrdinalIgnoreCase)) { int currentQty = Convert.ToInt32(row.Cells[2].Value); int maxAllowed = (pocket == 4 || pocket == 8) ? 1 : 999; if (currentQty < maxAllowed) { int spaceAvailable = maxAllowed - currentQty; int amountToFill = Math.Min(qtyToAdd, spaceAvailable); row.Cells[2].Value = currentQty + amountToFill; qtyToAdd -= amountToFill; } else if (pocket == 4 || pocket == 8) { qtyToAdd = 0; } } } while (qtyToAdd > 0) { int maxAllowed = (pocket == 4 || pocket == 8) ? 1 : 999; int amountForNewSlot = Math.Min(qtyToAdd, maxAllowed); dgvPockets[pocket].Rows.Add(intId, cbBagItems.Text, amountForNewSlot); qtyToAdd -= amountForNewSlot; if (pocket == 4 || pocket == 8) break; } UpdateBagItemDropdown(); }
+    private void UpdateBagItemDropdown() { 
+        if (!pbs.IsLoaded || tabBagPockets.SelectedIndex < 0) return; 
+        int currentPocket = tabBagPockets.SelectedIndex + 1; 
+        if (dgvPockets[currentPocket] == null) return; 
+        
+        string currentSelection = cbBagItems.Text; 
+        cbBagItems.Sorted = false; 
+        cbBagItems.Items.Clear(); 
+        
+        HashSet<string> existingItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase); 
+        if (currentPocket == 4 || currentPocket == 8) { 
+            foreach (DataGridViewRow row in dgvPockets[currentPocket].Rows) { 
+                if (row.Cells[0].Value != null) existingItems.Add(row.Cells[0].Value.ToString()); 
+            } 
+        } 
+        
+        List<string> sortedItems = new List<string>();
+        // NUEVO: Este HashSet recordará los nombres mostrados para bloquear los duplicados
+        HashSet<string> displayedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase); 
+
+        foreach (var kvp in pbs.Items) { 
+            int pkt = pbs.ItemPockets.ContainsKey(kvp.Key) ? pbs.ItemPockets[kvp.Key] : 1; 
+            if (pkt == currentPocket && !existingItems.Contains(kvp.Key)) { 
+                string name = pbs.GetName(pbs.Items, kvp.Key, kvp.Value);
+                
+                // Si este nombre NO está en nuestra lista de "ya mostrados", lo agregamos
+                if (displayedNames.Add(name)) {
+                    sortedItems.Add(name); 
+                }
+            } 
+        } 
+        
+        sortedItems = sortedItems.OrderBy(x => System.Text.RegularExpressions.Regex.Replace(x, @"\d+", m => m.Value.PadLeft(10, '0'))).ToList();
+        
+        currentBagDropdownItems = new List<string>(sortedItems);
+        
+        cbBagItems.Items.AddRange(sortedItems.ToArray());
+        
+        if (cbBagItems.Items.Contains(currentSelection)) cbBagItems.SelectedItem = currentSelection; 
+        else if (cbBagItems.Items.Count > 0) cbBagItems.SelectedIndex = 0; 
+    }
+    private string GetItemInternalIdFromDisplay(string display) {
+        if (string.IsNullOrWhiteSpace(display)) return "";
+        string cleanDisplay = display.Trim();
+        
+        // Compara el nombre contra nuestra traducción inteligente de MTs
+        foreach (var kvp in pbs.Items) {
+            if (pbs.GetName(pbs.Items, kvp.Key, kvp.Value).Equals(cleanDisplay, StringComparison.OrdinalIgnoreCase)) {
+                return kvp.Key;
+            }
+        }
+        // Si no lo encuentra, hace una búsqueda normal
+        foreach (var kvp in pbs.Items) {
+            if (kvp.Value.Equals(cleanDisplay, StringComparison.OrdinalIgnoreCase)) return kvp.Key;
+        }
+        return "";
+    }
+    private void BtnBagAdd_Click(object sender, EventArgs e) { 
+        if (string.IsNullOrWhiteSpace(cbBagItems.Text)) return; 
+        
+        string intId = GetItemInternalIdFromDisplay(cbBagItems.Text); 
+        if (string.IsNullOrEmpty(intId)) return; 
+        
+        int pocket = tabBagPockets.SelectedIndex + 1; 
+        int qtyToAdd = (pocket == 4 || pocket == 8) ? 1 : (int)numBagQty.Value; 
+        
+        foreach (DataGridViewRow row in dgvPockets[pocket].Rows) { 
+            if (qtyToAdd <= 0) break; 
+            if (row.Cells[0].Value != null && row.Cells[0].Value.ToString().Equals(intId, StringComparison.OrdinalIgnoreCase)) { 
+                int currentQty = Convert.ToInt32(row.Cells[2].Value); 
+                int maxAllowed = (pocket == 4 || pocket == 8) ? 1 : 999; 
+                if (currentQty < maxAllowed) { 
+                    int spaceAvailable = maxAllowed - currentQty; 
+                    int amountToFill = Math.Min(qtyToAdd, spaceAvailable); 
+                    row.Cells[2].Value = currentQty + amountToFill; 
+                    qtyToAdd -= amountToFill; 
+                } else if (pocket == 4 || pocket == 8) { 
+                    qtyToAdd = 0; 
+                } 
+            } 
+        } 
+        
+        while (qtyToAdd > 0) { 
+            int maxAllowed = (pocket == 4 || pocket == 8) ? 1 : 999; 
+            int amountForNewSlot = Math.Min(qtyToAdd, maxAllowed); 
+            dgvPockets[pocket].Rows.Add(intId, cbBagItems.Text, amountForNewSlot); 
+            qtyToAdd -= amountForNewSlot; 
+            if (pocket == 4 || pocket == 8) break; 
+        } 
+        
+        // FIX: Ordenamos también la cuadrícula de la mochila al instante
+        var sortedRows = dgvPockets[pocket].Rows.Cast<DataGridViewRow>()
+            .OrderBy(r => System.Text.RegularExpressions.Regex.Replace(r.Cells[1].Value?.ToString() ?? "", @"\d+", m => m.Value.PadLeft(10, '0')))
+            .ToArray();
+        dgvPockets[pocket].Rows.Clear();
+        dgvPockets[pocket].Rows.AddRange(sortedRows);
+        
+        UpdateBagItemDropdown(); 
+    }
     private void BtnBagMaxSelected_Click(object sender, EventArgs e) { if (tabBagPockets.SelectedIndex < 0) return; int pocket = tabBagPockets.SelectedIndex + 1; if (pocket == 4 || pocket == 8) { MessageBox.Show("Las MTs y Objetos Clave no pueden tener más de 1 unidad.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information); return; } if (dgvPockets[pocket].SelectedRows.Count > 0) { foreach (DataGridViewRow row in dgvPockets[pocket].SelectedRows) { if (!row.IsNewRow) row.Cells[2].Value = 999; } UpdateBagItemDropdown(); } else { MessageBox.Show("Selecciona un objeto de la tabla haciendo clic en su fila.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); } }
     private void BtnBagMaxCurrent_Click(object sender, EventArgs e) { if (currentSaveData == null) return; lblStatus.Text = "⏳ Maximizando los objetos que ya tienes..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { for (int pId = 1; pId <= 8; pId++) { if (dgvPockets[pId] == null) continue; int targetQty = (pId == 4 || pId == 8) ? 1 : 999; foreach (DataGridViewRow row in dgvPockets[pId].Rows) { if (row.Cells[0].Value != null) row.Cells[2].Value = targetQty; } } UpdateBagItemDropdown(); lblStatus.Text = "¡Tus objetos actuales han sido maximizados a 999!"; lblStatus.ForeColor = Color.Green; } finally { this.Cursor = Cursors.Default; } }
     private void BtnBagAddAll_Click(object sender, EventArgs e) { if (!pbs.IsLoaded) return; lblStatus.Text = "⏳ Inyectando todos los objetos del juego... Esto puede tardar unos segundos."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { foreach (var kvp in pbs.Items) { string intId = kvp.Key; string realName = pbs.GetName(pbs.Items, intId, kvp.Value); int pkt = pbs.ItemPockets.ContainsKey(intId) ? pbs.ItemPockets[intId] : 1; int targetQty = (pkt == 4 || pkt == 8) ? 1 : 999; bool found = false; foreach (DataGridViewRow row in dgvPockets[pkt].Rows) { if (row.Cells[0].Value != null && row.Cells[0].Value.ToString().Equals(intId, StringComparison.OrdinalIgnoreCase)) { found = true; if (pkt != 4 && pkt != 8) row.Cells[2].Value = targetQty; break; } } if (!found) dgvPockets[pkt].Rows.Add(intId, realName, targetQty); } UpdateBagItemDropdown(); lblStatus.Text = "¡Todos los objetos del juego han sido añadidos a tu mochila!"; lblStatus.ForeColor = Color.Green; } finally { this.Cursor = Cursors.Default; } }
@@ -822,7 +984,8 @@ public class MainForm : Form
 
             p.Gender = cbGender.Text; 
             p.HeldItem = cbItem.Text; 
-            p.InternalHeldItem = PokemonUtils.GetInternalId(pbs.Items, cbItem.Text, p.InternalHeldItem, pbs); 
+            // FIX: Usamos el traductor inteligente aquí también
+            p.InternalHeldItem = GetItemInternalIdFromDisplay(cbItem.Text); 
             if (string.IsNullOrWhiteSpace(p.InternalHeldItem)) p.InternalHeldItem = "Ninguno"; 
             
             // --- FIX NATURALEZAS SEGURO ---
@@ -833,6 +996,9 @@ public class MainForm : Form
                     p.InternalNature = infallibleNat; 
                     string realName = pbs.GetName(pbs.Natures, infallibleNat, infallibleNat);
                     p.Nature = string.IsNullOrEmpty(realName) ? infallibleNat : realName;
+
+                    // INYECCIÓN DIRECTA DE LA NATURALEZA A LA MEMORIA CRUDA
+                    SetRealNatureInRuby(p.PersonalID, infallibleNat);
                 }
             }
             
@@ -893,8 +1059,21 @@ public class MainForm : Form
         
         if (cbGender.Items.Contains(p.Gender)) cbGender.SelectedItem = p.Gender; else cbGender.SelectedIndex = 0; 
         
-        string internalNat = string.IsNullOrEmpty(p.InternalNature) ? p.Nature : p.InternalNature;
-        string natDisp = PokemonUtils.GetNatureDisplayName(p.Nature, internalNat); 
+        // --- LECTURA DIRECTA DE LA NATURALEZA (MENTAS INCLUIDAS) ---
+        // --- LECTURA DIRECTA DE LA NATURALEZA (MENTAS INCLUIDAS) ---
+        string rubyNature = GetRealNatureFromRuby(p.PersonalID);
+        string internalNat = string.IsNullOrEmpty(rubyNature) ? (string.IsNullOrEmpty(p.InternalNature) ? p.Nature : p.InternalNature) : rubyNature;
+        
+        // 1. Traducimos el ID interno (ej. "JOLLY") a su nombre real en español (ej. "Alegre")
+        string realNatureName = pbs.GetName(pbs.Natures, internalNat, internalNat);
+        if (string.IsNullOrEmpty(realNatureName)) realNatureName = p.Nature;
+
+        // 2. ¡CRUCIAL! Sincronizamos la memoria interna del Pokémon para que calcule bien los stats al guardar
+        p.InternalNature = internalNat;
+        p.Nature = realNatureName;
+
+        // 3. Generamos el texto perfecto para el menú: "Alegre (+Velocid., -At. Esp.)"
+        string natDisp = PokemonUtils.GetNatureDisplayName(realNatureName, internalNat); 
         if (string.IsNullOrEmpty(natDisp)) natDisp = internalNat;
         
         if (!string.IsNullOrEmpty(natDisp)) {
@@ -1058,6 +1237,9 @@ public class MainForm : Form
             
             SaveParser parser = new SaveParser(currentSavePath, pbs); currentSaveData = parser.ParseSave(); isUpdatingUI = true; 
             
+            // --- NUEVO: Extraer MTs Randomizadas antes de cargar la Interfaz ---
+            ExtractRandomizedTMs();
+            
             string dir = Path.GetDirectoryName(currentSavePath);
             isRandomizedSave = Directory.GetFiles(dir, "*tm_compatibility*.dat").Any() || Directory.GetFiles(dir, "*random*.dat").Any();
 
@@ -1072,12 +1254,28 @@ public class MainForm : Form
 
             cbBoxSelector.Items.Clear(); foreach (var box in currentSaveData.Boxes) cbBoxSelector.Items.Add($"{box.Name} (Caja {box.BoxIndex})"); 
             foreach (var grid in dgvPockets) grid?.Rows.Clear(); 
-            foreach (var item in currentSaveData.Bag) { int pId = item.Pocket >= 1 && item.Pocket <= 8 ? item.Pocket : 1; string realName = pbs != null ? pbs.GetName(pbs.Items, item.InternalName, item.Name) : item.Name; dgvPockets[pId]?.Rows.Add(item.InternalName, realName, item.Quantity); }
+            
+            foreach (var item in currentSaveData.Bag) { 
+                int pId = item.Pocket >= 1 && item.Pocket <= 8 ? item.Pocket : 1; 
+                string realName = pbs != null ? pbs.GetName(pbs.Items, item.InternalName, item.Name) : item.Name; 
+                dgvPockets[pId]?.Rows.Add(item.InternalName, realName, item.Quantity); 
+            }
             
             long safeMoney = GetMoneySafely();
             numMoney.Value = Math.Min(numMoney.Maximum, Math.Max(0m, (decimal)safeMoney));
 
-            if (pbs.IsLoaded) { cbNature.Items.Clear(); foreach (var natKvp in pbs.Natures) { string disp = PokemonUtils.GetNatureDisplayName(natKvp.Value, natKvp.Key); if (!cbNature.Items.Contains(disp)) cbNature.Items.Add(disp); } cbAbility.Items.Clear(); cbAbility.Items.AddRange(pbs.Abilities.Values.Distinct().ToArray()); cbItem.Items.Clear(); var allItemsList = pbs.Items.Select(x => pbs.GetName(pbs.Items, x.Key, x.Value)).Distinct().ToArray(); cbItem.Items.AddRange(allItemsList); var allMoves = pbs.Moves.Values.Distinct().ToArray(); foreach (var cb in cbMoves) { cb.Items.Clear(); cb.Items.AddRange(allMoves); } }
+            if (pbs.IsLoaded) { 
+                cbNature.Items.Clear(); foreach (var natKvp in pbs.Natures) { string disp = PokemonUtils.GetNatureDisplayName(natKvp.Value, natKvp.Key); if (!cbNature.Items.Contains(disp)) cbNature.Items.Add(disp); } 
+                cbAbility.Items.Clear(); cbAbility.Items.AddRange(pbs.Abilities.Values.Distinct().ToArray()); 
+                
+                cbItem.Items.Clear(); 
+                var allItemsList = pbs.Items.Select(x => pbs.GetName(pbs.Items, x.Key, x.Value)).Distinct().ToArray(); 
+                cbItem.Items.AddRange(allItemsList); 
+                
+                var allMoves = pbs.Moves.Values.Distinct().ToArray(); 
+                foreach (var cb in cbMoves) { cb.Items.Clear(); cb.Items.AddRange(allMoves); } 
+            }
+            
             isUpdatingUI = false; if (cbBoxSelector.Items.Count > 0) cbBoxSelector.SelectedIndex = 0; 
             RefreshPartyGrid(); RefreshPCGrid(); tabBagPockets.SelectedIndex = 0; UpdateBagItemDropdown();
             btnSave.Enabled = true; lblStatus.Text = $"Partida cargada: {Path.GetFileName(currentSavePath)}"; lblStatus.ForeColor = Color.Green;
@@ -1232,9 +1430,16 @@ public class MainForm : Form
         string ab1 = GetAbilityForSlot(p, 1);
         string ab2 = GetAbilityForSlot(p, 2); 
         
+        // Seguro de vida por si la ranura principal falla por algún motivo
+        if (string.IsNullOrEmpty(ab0)) {
+            ab0 = pbs.GetName(pbs.Abilities, GetPBSAbility(p.InternalSpecies, p.Form, 0, AppRoot), "Desconocida");
+        }
+        
         ctx.Items.Add($"Ranura 1: {ab0}").Click += (s, ev) => { cbAbility.Text = ab0; ApplyCurrentEdits(); };
+        
         if (!string.IsNullOrEmpty(ab1) && ab1 != ab0) 
             ctx.Items.Add($"Ranura 2: {ab1}").Click += (s, ev) => { cbAbility.Text = ab1; ApplyCurrentEdits(); };
+            
         if (!string.IsNullOrEmpty(ab2) && ab2 != ab0 && ab2 != ab1) 
             ctx.Items.Add($"Oculta: {ab2}").Click += (s, ev) => { cbAbility.Text = ab2; ApplyCurrentEdits(); };
         
@@ -1243,10 +1448,412 @@ public class MainForm : Form
     }
 
     private string GetAbilityForSlot(Pokemon p, int slotIndex) {
+        // 1. Buscamos si el randomizer le asignó una habilidad a esta ranura específica
         string ab = GetRandomizedAbility(p.InternalSpecies, p.Form, slotIndex);
-        if (string.IsNullOrEmpty(ab)) ab = GetPBSAbility(p.InternalSpecies, p.Form, slotIndex, AppRoot);
-        if (string.IsNullOrEmpty(ab)) ab = GetPBSAbility(p.InternalSpecies, p.Form, 0, AppRoot); 
+        
+        // 2. Si el randomizer no le dio nada, buscamos si el Pokémon tiene esta ranura de forma oficial (PBS)
+        if (string.IsNullOrEmpty(ab)) {
+            ab = GetPBSAbility(p.InternalSpecies, p.Form, slotIndex, AppRoot);
+        }
+        
+        // FIX: Si después de eso sigue vacía, el Pokémon NO tiene esta ranura (ej. Slaking no tiene oculta). 
+        // Devolvemos nulo para que el menú no intente rellenarlo con basura.
+        if (string.IsNullOrEmpty(ab)) return null;
+        
         return pbs.GetName(pbs.Abilities, ab, ab);
+    }
+
+    private string GetRubyString(object obj) {
+        object val = Unwrap(obj);
+        if (val == null) return "";
+        
+        // Si el juego guardó la estructura completa del Movimiento (RubyObject), lo abrimos y sacamos su @id
+        if (val is RubyObject ro && ro.Attributes != null) {
+            if (ro.Attributes.ContainsKey("@id")) {
+                val = Unwrap(ro.Attributes["@id"]);
+            }
+        }
+        
+        return val?.ToString()?.Replace(":", "")?.Replace("@", "")?.Trim() ?? "";
+    }
+
+    private object FindAttributeInRubyDeep(object node, string targetAttr, HashSet<object> visited = null) {
+        visited ??= new HashSet<object>();
+        if (node == null || visited.Contains(node)) return null;
+        visited.Add(node);
+
+        node = Unwrap(node);
+        if (node == null) return null;
+
+        if (node is RubyObject ro && ro.Attributes != null) {
+            if (ro.Attributes.ContainsKey(targetAttr)) return Unwrap(ro.Attributes[targetAttr]);
+            foreach (var val in ro.Attributes.Values) {
+                var found = FindAttributeInRubyDeep(val, targetAttr, visited);
+                if (found != null) return found;
+            }
+        } else if (node is IList list) {
+            foreach (var item in list) {
+                var found = FindAttributeInRubyDeep(item, targetAttr, visited);
+                if (found != null) return found;
+            }
+        } else if (node is IDictionary dict) {
+            if (dict.Contains(targetAttr)) return Unwrap(dict[targetAttr]);
+            foreach (DictionaryEntry kvp in dict) {
+                string k = GetRubyString(kvp.Key);
+                if (k == targetAttr || "@" + k == targetAttr) return Unwrap(kvp.Value);
+                var found = FindAttributeInRubyDeep(kvp.Value, targetAttr, visited);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private void ExtractRandomizedTMs() {
+        pbs.RandomizedItemMoves.Clear();
+        if (currentSaveData == null || currentSaveData.RootData == null) return;
+        
+        try {
+            // Radiografía directa al interior de la partida (.rxdata)
+            object tmMapRaw = FindAttributeInRubyDeep(currentSaveData.RootData, "@tm_move_map");
+            object randomMovesRaw = FindAttributeInRubyDeep(currentSaveData.RootData, "@random_moves");
+            
+            if (tmMapRaw is IDictionary tmMap) {
+                foreach (DictionaryEntry kvp in tmMap) {
+                    try {
+                        string tmItem = GetRubyString(kvp.Key).ToUpper();
+                        string tmMove = GetRubyString(kvp.Value).ToUpper();
+                        if (!string.IsNullOrEmpty(tmItem) && !string.IsNullOrEmpty(tmMove) && tmMove != "RUBYOBJECT") {
+                            pbs.RandomizedItemMoves[tmItem] = tmMove;
+                            if (tmItem.StartsWith("TM")) pbs.RandomizedItemMoves["MT" + tmItem.Substring(2)] = tmMove;
+                            if (tmItem.StartsWith("MT")) pbs.RandomizedItemMoves["TM" + tmItem.Substring(2)] = tmMove;
+                        }
+                    } catch { } 
+                }
+            } else if (tmMapRaw is IList tmArray) {
+                for (int i = 1; i < tmArray.Count; i++) {
+                    try {
+                        string tmMove = GetRubyString(tmArray[i]).ToUpper();
+                        if (!string.IsNullOrEmpty(tmMove) && tmMove != "RUBYOBJECT") {
+                            string id2 = i.ToString("D2");
+                            string id3 = i.ToString("D3");
+                            pbs.RandomizedItemMoves["MT" + id2] = tmMove;
+                            pbs.RandomizedItemMoves["TM" + id2] = tmMove;
+                            pbs.RandomizedItemMoves["MT" + id3] = tmMove;
+                            pbs.RandomizedItemMoves["TM" + id3] = tmMove;
+                        }
+                    } catch { }
+                }
+            }
+            
+            if (randomMovesRaw is IDictionary randomMovesDict) {
+                Dictionary<string, string> globalRandomMoves = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (DictionaryEntry kvp in randomMovesDict) {
+                    try {
+                        string originalMove = GetRubyString(kvp.Key).ToUpper();
+                        string newMove = GetRubyString(kvp.Value).ToUpper();
+                        if (!string.IsNullOrEmpty(originalMove) && !string.IsNullOrEmpty(newMove) && newMove != "RUBYOBJECT") {
+                            globalRandomMoves[originalMove] = newMove;
+                        }
+                    } catch { }
+                }
+                
+                foreach (var kvp in pbs.ItemMoves) {
+                    string tmItem = kvp.Key.ToUpper();
+                    string originalTmMove = kvp.Value.ToUpper();
+                    
+                    if (!pbs.RandomizedItemMoves.ContainsKey(tmItem) && globalRandomMoves.ContainsKey(originalTmMove)) {
+                        pbs.RandomizedItemMoves[tmItem] = globalRandomMoves[originalTmMove];
+                        if (tmItem.StartsWith("TM")) pbs.RandomizedItemMoves["MT" + tmItem.Substring(2)] = globalRandomMoves[originalTmMove];
+                        if (tmItem.StartsWith("MT")) pbs.RandomizedItemMoves["TM" + tmItem.Substring(2)] = globalRandomMoves[originalTmMove];
+                    }
+                }
+            }
+        } catch { }
+        
+        FixMissingRandomizedTMs(); 
+    }
+
+    private void FixMissingRandomizedTMs() {
+        bool isRandomized = pbs.RandomizedItemMoves.Count > 0;
+        if (!isRandomized) return;
+
+        var allMoves = pbs.Moves.Keys.ToList();
+        HashSet<string> usedMoves = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var move in pbs.RandomizedItemMoves.Values) { usedMoves.Add(move); }
+        
+        List<string> unusedMoves = allMoves.Where(m => !usedMoves.Contains(m)).ToList();
+        
+        int seed = 0;
+        try {
+            var trainer = FindObjectByClassName(currentSaveData.RootData, "PokeBattle_Trainer") ?? FindObjectByClassName(currentSaveData.RootData, "Player");
+            if (trainer != null && trainer.Attributes != null && trainer.Attributes.ContainsKey("@id")) {
+                seed = SafeGetInt(Unwrap(trainer.Attributes["@id"]));
+            }
+        } catch {}
+        
+        Random rnd = new Random(seed); 
+        unusedMoves = unusedMoves.OrderBy(x => rnd.Next()).ToList();
+        
+        int missingIndex = 0;
+        
+        foreach (var kvp in pbs.ItemMoves.ToList()) {
+            string exactKey = kvp.Key; 
+            string exactKeyUpper = exactKey.ToUpper();
+
+            // --- EL SEGURO DE VIDA ANTI-MOs ---
+            // Si la MT ya tiene su ataque oficial extraído del juego, prohibimos que la sobrescriban
+            var match = System.Text.RegularExpressions.Regex.Match(exactKeyUpper, @"\d+");
+            if (match.Success) {
+                string numPart = match.Value;
+                if (pbs.RandomizedItemMoves.ContainsKey("MT" + numPart) || pbs.RandomizedItemMoves.ContainsKey("TM" + numPart)) {
+                    continue; // ¡Salvada! Saltamos al siguiente objeto.
+                }
+            }
+
+            if (!pbs.RandomizedItemMoves.ContainsKey(exactKey) && !pbs.RandomizedItemMoves.ContainsKey(exactKeyUpper)) {
+                string newMove = (missingIndex < unusedMoves.Count) ? unusedMoves[missingIndex++] : allMoves[rnd.Next(allMoves.Count)];
+                
+                pbs.RandomizedItemMoves[exactKey] = newMove;
+                pbs.RandomizedItemMoves[exactKeyUpper] = newMove;
+                
+                if (match.Success) {
+                    string numPart = match.Value;
+                    pbs.RandomizedItemMoves["MT" + numPart] = newMove;
+                    pbs.RandomizedItemMoves["TM" + numPart] = newMove;
+                    InjectTMIntoRuby("MT" + numPart, newMove);
+                    InjectTMIntoRuby("TM" + numPart, newMove);
+                }
+            }
+        }
+    }
+
+    private void InjectTMIntoRuby(string tmItem, string newMove) {
+        try {
+            if (currentSaveData == null || currentSaveData.RootData == null) return;
+            if (currentSaveData.RootData is IDictionary dict) {
+                object globalMetaRaw = null;
+                foreach (DictionaryEntry kvp in dict) {
+                    if (Unwrap(kvp.Key)?.ToString() == "global_metadata") { globalMetaRaw = Unwrap(kvp.Value); break; }
+                }
+                if (globalMetaRaw is RubyObject globalMeta && globalMeta.Attributes != null) {
+                    if (!globalMeta.Attributes.ContainsKey("@tm_move_map")) {
+                        globalMeta.Attributes["@tm_move_map"] = new Dictionary<object, object>();
+                    }
+                    if (Unwrap(globalMeta.Attributes["@tm_move_map"]) is IDictionary tmMap) {
+                        tmMap[new RubySymbol(tmItem)] = new RubySymbol(newMove);
+                    }
+                }
+            }
+        } catch { }
+    }
+
+    private void ExtractFromTmMap(object tmMapRaw) {
+        if (tmMapRaw is IDictionary tmMap) {
+            foreach (DictionaryEntry kvp in tmMap) {
+                try {
+                    string tmItem = GetRubyString(kvp.Key).ToUpper();
+                    string tmMove = GetRubyString(kvp.Value).ToUpper();
+                    if (!string.IsNullOrEmpty(tmItem) && !string.IsNullOrEmpty(tmMove) && tmMove != "RUBYOBJECT") {
+                        pbs.RandomizedItemMoves[tmItem] = tmMove;
+                        if (tmItem.StartsWith("TM")) pbs.RandomizedItemMoves["MT" + tmItem.Substring(2)] = tmMove;
+                        if (tmItem.StartsWith("MT")) pbs.RandomizedItemMoves["TM" + tmItem.Substring(2)] = tmMove;
+                    }
+                } catch { } 
+            }
+        }
+        else if (tmMapRaw is IList tmArray) {
+            for (int i = 1; i < tmArray.Count; i++) {
+                try {
+                    string tmMove = GetRubyString(tmArray[i]).ToUpper();
+                    if (!string.IsNullOrEmpty(tmMove) && tmMove != "RUBYOBJECT") {
+                        string id2 = i.ToString("D2");
+                        string id3 = i.ToString("D3");
+                        pbs.RandomizedItemMoves["MT" + id2] = tmMove;
+                        pbs.RandomizedItemMoves["TM" + id2] = tmMove;
+                        pbs.RandomizedItemMoves["MT" + id3] = tmMove;
+                        pbs.RandomizedItemMoves["TM" + id3] = tmMove;
+                    }
+                } catch { }
+            }
+        }
+    }
+
+    private bool InjectIntoRootNode(object rootNode, string tmItem, string newMove) {
+        bool changed = false;
+        try {
+            string numPart = System.Text.RegularExpressions.Regex.Match(tmItem, @"\d+").Value;
+            if (string.IsNullOrEmpty(numPart)) numPart = tmItem.Replace("MT", "").Replace("TM", "");
+
+            if (rootNode is IDictionary dict) {
+                // A: global_metadata -> @tm_move_map
+                object globalMetaRaw = null;
+                foreach (DictionaryEntry kvp in dict) {
+                    if (Unwrap(kvp.Key)?.ToString() == "global_metadata") { globalMetaRaw = Unwrap(kvp.Value); break; }
+                }
+                if (globalMetaRaw is RubyObject globalMeta && globalMeta.Attributes != null) {
+                    if (!globalMeta.Attributes.ContainsKey("@tm_move_map")) {
+                        globalMeta.Attributes["@tm_move_map"] = new Dictionary<object, object>();
+                    }
+                    if (Unwrap(globalMeta.Attributes["@tm_move_map"]) is IDictionary tmMap) {
+                        tmMap[new RubySymbol("MT" + numPart)] = new RubySymbol(newMove);
+                        tmMap[new RubySymbol("TM" + numPart)] = new RubySymbol(newMove);
+                        changed = true;
+                    }
+                }
+                
+                // B: Es un hash directo (.dat file format)
+                bool isTmDict = false;
+                foreach (DictionaryEntry kvp in dict) {
+                    string keyStr = GetRubyString(kvp.Key).ToUpper();
+                    if (keyStr.StartsWith("TM") || keyStr.StartsWith("MT") || keyStr.StartsWith("ITEM_TM")) {
+                        isTmDict = true; break;
+                    }
+                }
+                if (isTmDict) {
+                    // Metemos el ataque en todos los formatos posibles para que el juego no pueda escapar
+                    dict[new RubySymbol("MT" + numPart)] = new RubySymbol(newMove);
+                    dict[new RubySymbol("TM" + numPart)] = new RubySymbol(newMove);
+                    dict[new RubySymbol("ITEM_MT" + numPart)] = new RubySymbol(newMove);
+                    dict[new RubySymbol("ITEM_TM" + numPart)] = new RubySymbol(newMove);
+                    
+                    dict["MT" + numPart] = newMove;
+                    dict["TM" + numPart] = newMove;
+                    changed = true;
+                }
+            }
+        } catch { }
+        return changed;
+    }
+
+    private void ChangeTMMove(string tmInternalId, string currentDisplayName, int rowIndex) {
+        if (!pbs.IsLoaded) return;
+
+        using (Form form = new Form { Text = "Personalizar MT", Size = new Size(320, 290), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false }) {
+            
+            // 1. Obtenemos el ataque actual PRIMERO
+            string currentMoveInternal = pbs.RandomizedItemMoves.ContainsKey(tmInternalId) ? pbs.RandomizedItemMoves[tmInternalId] : (pbs.ItemMoves.ContainsKey(tmInternalId) ? pbs.ItemMoves[tmInternalId] : "");
+            string currentMoveName = pbs.Moves.ContainsKey(currentMoveInternal) ? pbs.Moves[currentMoveInternal] : "Ninguno";
+
+            // 2. Colocamos el ataque actual en el título (Label) en vez de en la caja de texto
+            Label lbl = new Label { Text = $"Elige un ataque para {tmInternalId}\n(Actual: {currentMoveName}):", Location = new Point(15, 5), AutoSize = true, Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
+            
+            // 3. La caja de texto ahora inicia 100% vacía
+            TextBox txtSearch = new TextBox { Location = new Point(15, 45), Size = new Size(270, 25) };
+            
+            ListBox lbResults = new ListBox { Location = new Point(15, 75), Size = new Size(270, 110) };
+            
+            var allMovesRaw = pbs.Moves.Values.Distinct().OrderBy(m => m).ToList();
+            lbResults.Items.AddRange(allMovesRaw.ToArray());
+            
+            txtSearch.TextChanged += (s, e) => {
+                string search = txtSearch.Text;
+                lbResults.Items.Clear();
+                if (string.IsNullOrWhiteSpace(search)) {
+                    lbResults.Items.AddRange(allMovesRaw.ToArray());
+                } else {
+                    var fil = allMovesRaw.Where(x => x.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
+                    lbResults.Items.AddRange(fil);
+                }
+                if (lbResults.Items.Count > 0) lbResults.SelectedIndex = 0;
+            };
+            
+            txtSearch.KeyDown += (s, e) => {
+                if (e.KeyCode == Keys.Down && lbResults.SelectedIndex < lbResults.Items.Count - 1) {
+                    lbResults.SelectedIndex++;
+                    e.Handled = true;
+                } else if (e.KeyCode == Keys.Up && lbResults.SelectedIndex > 0) {
+                    lbResults.SelectedIndex--;
+                    e.Handled = true;
+                }
+            };
+
+            Button btnOk = new Button { Text = "💉 Inyectar", Location = new Point(90, 200), Size = new Size(130, 30), DialogResult = DialogResult.OK, BackColor = Color.LightGreen, Cursor = Cursors.Hand };
+            
+            lbResults.DoubleClick += (s, e) => { if (lbResults.SelectedItem != null) btnOk.PerformClick(); };
+
+            form.Controls.Add(lbl); form.Controls.Add(txtSearch); form.Controls.Add(lbResults); form.Controls.Add(btnOk);
+            form.AcceptButton = btnOk; 
+
+            // Enfocar automáticamente la caja de texto vacía al abrir la ventana
+            form.Shown += (s, e) => { txtSearch.Focus(); };
+
+            if (form.ShowDialog() == DialogResult.OK && lbResults.SelectedItem != null) {
+                string selectedMoveName = lbResults.SelectedItem.ToString();
+                string selectedMoveInternal = PokemonUtils.GetInternalId(pbs.Moves, selectedMoveName, "", pbs);
+                
+                if (!string.IsNullOrEmpty(selectedMoveInternal)) {
+                    pbs.RandomizedItemMoves[tmInternalId] = selectedMoveInternal;
+                    
+                    string numPart = System.Text.RegularExpressions.Regex.Match(tmInternalId, @"\d+").Value;
+                    if (!string.IsNullOrEmpty(numPart)) {
+                        pbs.RandomizedItemMoves["MT" + numPart] = selectedMoveInternal;
+                        pbs.RandomizedItemMoves["TM" + numPart] = selectedMoveInternal;
+                        InjectTMIntoRuby("MT" + numPart, selectedMoveInternal);
+                        InjectTMIntoRuby("TM" + numPart, selectedMoveInternal);
+                    } else {
+                        InjectTMIntoRuby(tmInternalId, selectedMoveInternal);
+                    }
+                    
+                    dgvPockets[4].Rows[rowIndex].Cells[1].Value = pbs.GetName(pbs.Items, tmInternalId, tmInternalId);
+                    UpdateBagItemDropdown();
+                    MessageBox.Show($"¡{tmInternalId} ahora enseñará '{selectedMoveName}'!", "Inyectado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+        }
+    }
+
+    private string GetRealNatureFromRuby(long personalId) {
+        if (currentSaveData == null || currentSaveData.RootData == null) return null;
+        var pkmObjects = FindAllObjectsByClassName(currentSaveData.RootData, "PokeBattle_Pokemon");
+        if (pkmObjects.Count == 0) pkmObjects = FindAllObjectsByClassName(currentSaveData.RootData, "Pokemon");
+        foreach (dynamic ro in pkmObjects) {
+            if (ro.Attributes != null) {
+                object pidObj = ro.Attributes.ContainsKey("@personalID") ? ro.Attributes["@personalID"] : 
+                               (ro.Attributes.ContainsKey("@personal_id") ? ro.Attributes["@personal_id"] : 
+                               (ro.Attributes.ContainsKey("@pid") ? ro.Attributes["@pid"] : null));
+                if (pidObj != null && SafeGetLong(Unwrap(pidObj)) == personalId) {
+                    
+                    // 1. Prioridad Absoluta: Naturaleza por Mentas
+                    if (ro.Attributes.ContainsKey("@nature_for_stats") && ro.Attributes["@nature_for_stats"] != null) {
+                        string mint = Unwrap(ro.Attributes["@nature_for_stats"]).ToString().Replace(":", "").Trim();
+                        if (!string.IsNullOrEmpty(mint) && mint != "RUBYOBJECT") return mint;
+                    }
+                    if (ro.Attributes.ContainsKey("@calc_nature") && ro.Attributes["@calc_nature"] != null) {
+                        string calc = Unwrap(ro.Attributes["@calc_nature"]).ToString().Replace(":", "").Trim();
+                        if (!string.IsNullOrEmpty(calc) && calc != "RUBYOBJECT") return calc;
+                    }
+                    
+                    // 2. Naturaleza de Nacimiento
+                    if (ro.Attributes.ContainsKey("@nature") && ro.Attributes["@nature"] != null) {
+                        string baseNat = Unwrap(ro.Attributes["@nature"]).ToString().Replace(":", "").Trim();
+                        if (!string.IsNullOrEmpty(baseNat) && baseNat != "RUBYOBJECT") return baseNat;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private void SetRealNatureInRuby(long personalId, string newNatureInternal) {
+        if (currentSaveData == null || currentSaveData.RootData == null || string.IsNullOrEmpty(newNatureInternal)) return;
+        var pkmObjects = FindAllObjectsByClassName(currentSaveData.RootData, "PokeBattle_Pokemon");
+        if (pkmObjects.Count == 0) pkmObjects = FindAllObjectsByClassName(currentSaveData.RootData, "Pokemon");
+        foreach (dynamic ro in pkmObjects) {
+            if (ro.Attributes != null) {
+                object pidObj = ro.Attributes.ContainsKey("@personalID") ? ro.Attributes["@personalID"] : 
+                               (ro.Attributes.ContainsKey("@personal_id") ? ro.Attributes["@personal_id"] : 
+                               (ro.Attributes.ContainsKey("@pid") ? ro.Attributes["@pid"] : null));
+                if (pidObj != null && SafeGetLong(Unwrap(pidObj)) == personalId) {
+                    
+                    object finalVal = new RubySymbol(newNatureInternal);
+                    
+                    // Sobrescribimos tanto el nacimiento como las mentas para que el juego obedezca al 100%
+                    ro.Attributes["@nature"] = finalVal;
+                    if (ro.Attributes.ContainsKey("@nature_for_stats")) ro.Attributes["@nature_for_stats"] = finalVal;
+                    if (ro.Attributes.ContainsKey("@calc_nature")) ro.Attributes["@calc_nature"] = finalVal;
+                }
+            }
+        }
     }
 
 }

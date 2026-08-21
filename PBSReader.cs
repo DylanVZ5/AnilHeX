@@ -11,7 +11,7 @@ public class PBSReader
     public Dictionary<string, string> ItemDescriptions { get; private set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> ItemPockets { get; private set; } = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> ItemMoves { get; private set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    
+    public Dictionary<string, string> RandomizedItemMoves { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> Moves { get; private set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> MoveDescriptions { get; private set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> MovePPs { get; private set; } = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -176,11 +176,23 @@ public class PBSReader
         if (string.IsNullOrWhiteSpace(rawId)) return fallback;
         string cleanId = rawId.Replace(":", "").Replace("@", "").Trim();
 
-        if (dict == Items && ItemMoves.TryGetValue(cleanId, out string moveInternal))
+        if (dict == Items)
         {
-            string baseItemName = dict.TryGetValue(cleanId, out string realName) ? realName : cleanId;
-            string moveRealName = Moves.TryGetValue(moveInternal, out string mName) ? mName : moveInternal;
-            return $"{baseItemName}: {moveRealName}"; 
+            // 1. Declaramos las variables primero para que C# no se queje de que están sin asignar
+            string rMove = null;
+            string nMove = null;
+            
+            // 2. Ahora sí hacemos la comprobación
+            bool hasRandomMove = RandomizedItemMoves != null && RandomizedItemMoves.TryGetValue(cleanId, out rMove);
+            bool hasNormalMove = ItemMoves != null && ItemMoves.TryGetValue(cleanId, out nMove);
+            
+            if (hasRandomMove || hasNormalMove)
+            {
+                string moveInternal = hasRandomMove ? rMove : nMove;
+                string baseItemName = dict.TryGetValue(cleanId, out string realName) ? realName : cleanId;
+                string moveRealName = Moves.TryGetValue(moveInternal, out string mName) ? mName : moveInternal;
+                return $"{baseItemName}: {moveRealName}"; 
+            }
         }
 
         return dict.TryGetValue(cleanId, out string realNameFallback) ? realNameFallback : cleanId;
