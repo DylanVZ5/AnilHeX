@@ -24,69 +24,48 @@ public class SaveParser
         _pbs = pbs;
     }
 
-    public SaveDataModel ParseSave(object existingRootData = null)
+    // Carga Inteligente: Si ya tiene la memoria, no busca nada.
+    public SaveDataModel ParseSave(SaveDataModel existingModel = null)
     {
         SaveDataModel model = new SaveDataModel();
-        object rootData = existingRootData;
+        object rootData = existingModel?.RootData;
 
-        // Si no le pasamos datos en memoria, lee el archivo de guardado físico
+        // Si no le pasamos datos en memoria, lee el archivo físico (Decompresión)
         if (rootData == null)
         {
             byte[] fileBytes = File.ReadAllBytes(_savePath);
             if (fileBytes.Length < 2) throw new Exception("El archivo de guardado está vacío o corrupto.");
-
-            Stream decompressedStream = null;
-            MemoryStream memStream = null;
-
-            try
-            {
+            Stream decompressedStream = null; MemoryStream memStream = null;
+            try {
                 if (fileBytes[0] == 0x04 && fileBytes[1] == 0x08) { decompressedStream = new MemoryStream(fileBytes); }
-                else
-                {
+                else {
                     bool success = false;
-                    try {
-                        using (var sourceStream = new MemoryStream(fileBytes))
-                        using (var zlib = new ZLibStream(sourceStream, CompressionMode.Decompress)) {
-                            memStream = new MemoryStream(); zlib.CopyTo(memStream); memStream.Position = 0;
-                            decompressedStream = memStream; success = true;
-                        }
-                    } catch { }
-                    if (!success) {
-                        try {
-                            using (var sourceStream = new MemoryStream(fileBytes, 2, fileBytes.Length - 2))
-                            using (var deflate = new DeflateStream(sourceStream, CompressionMode.Decompress)) {
-                                memStream = new MemoryStream(); deflate.CopyTo(memStream); memStream.Position = 0;
-                                decompressedStream = memStream; success = true;
-                            }
-                        } catch { }
-                    }
-                    if (!success) {
-                        using (var sourceStream = new MemoryStream(fileBytes))
-                        using (var deflate = new DeflateStream(sourceStream, CompressionMode.Decompress)) {
-                            memStream = new MemoryStream(); deflate.CopyTo(memStream); memStream.Position = 0;
-                            decompressedStream = memStream;
-                        }
-                    }
+                    try { using (var sourceStream = new MemoryStream(fileBytes)) using (var zlib = new ZLibStream(sourceStream, CompressionMode.Decompress)) { memStream = new MemoryStream(); zlib.CopyTo(memStream); memStream.Position = 0; decompressedStream = memStream; success = true; } } catch { }
+                    if (!success) { try { using (var sourceStream = new MemoryStream(fileBytes, 2, fileBytes.Length - 2)) using (var deflate = new DeflateStream(sourceStream, CompressionMode.Decompress)) { memStream = new MemoryStream(); deflate.CopyTo(memStream); memStream.Position = 0; decompressedStream = memStream; success = true; } } catch { } }
+                    if (!success) { using (var sourceStream = new MemoryStream(fileBytes)) using (var deflate = new DeflateStream(sourceStream, CompressionMode.Decompress)) { memStream = new MemoryStream(); deflate.CopyTo(memStream); memStream.Position = 0; decompressedStream = memStream; } }
                 }
-
-                using (decompressedStream)
-                {
-                    RubyMarshalReader reader = new RubyMarshalReader(decompressedStream);
-                    rootData = reader.ReadValue();
-                }
-            }
-            finally
-            {
-                if (decompressedStream != memStream) memStream?.Dispose();
-            }
+                using (decompressedStream) { RubyMarshalReader reader = new RubyMarshalReader(decompressedStream); rootData = reader.ReadValue(); }
+            } finally { if (decompressedStream != memStream) memStream?.Dispose(); }
         }
 
         model.RootData = rootData;
 
+        // --- EXTRACCIÓN CON CACHÉ ---
+        RubyObject trainerObj = existingModel?.RubyTrainer ?? FindObjectByClass(rootData, "PokeBattle_Trainer") ?? FindObjectByClass(rootData, "Player") ?? FindObjectWithAttribute(rootData, "@party");
+        model.RubyTrainer = trainerObj;
+
+        RubyObject storageObj = FindObjectByClass(rootData, "PokemonStorage") ?? FindObjectWithAttribute(rootData, "@boxes");
+
+        RubyObject bagRo = existingModel?.RubyBag ?? FindObjectByClass(rootData, "PokemonBag");
+        model.RubyBag = bagRo;
+
+        RubyObject pokedex = existingModel?.RubyPokedex ?? FindObjectByClass(rootData, "PlayerPokedex") ?? FindObjectWithAttribute(rootData, "@owned");
+        model.RubyPokedex = pokedex;
+
         // --- EXTRACCIÓN DE EQUIPO ---
-        RubyObject trainerObj = FindObjectByClass(rootData, "PokeBattle_Trainer") ?? FindObjectByClass(rootData, "Player") ?? FindObjectWithAttribute(rootData, "@party");
         if (trainerObj != null && Unwrap(trainerObj.Get("@party")) is IList partyList)
         {
+            model.RubyPartyList = partyList; // <--- 1. GUARDAMOS EL CACHÉ DEL EQUIPO
             foreach (var pokeObj in partyList)
             {
                 if (Unwrap(pokeObj) is RubyObject ro) model.Party.Add(MapRubyToPokemon(ro));
@@ -94,9 +73,9 @@ public class SaveParser
         }
 
         // --- EXTRACCIÓN DE CAJAS ---
-        RubyObject storageObj = FindObjectByClass(rootData, "PokemonStorage") ?? FindObjectWithAttribute(rootData, "@boxes");
         if (storageObj != null && Unwrap(storageObj.Get("@boxes")) is IList boxesList)
         {
+            model.RubyBoxesList = boxesList; // <--- 2. GUARDAMOS EL CACHÉ DEL PC
             for (int b = 0; b < boxesList.Count; b++)
             {
                 if (Unwrap(boxesList[b]) is RubyObject boxRo)
@@ -116,7 +95,6 @@ public class SaveParser
         }
 
         // --- EXTRACCIÓN DE MOCHILA ---
-        RubyObject bagRo = FindObjectByClass(rootData, "PokemonBag");
         if (bagRo != null && Unwrap(bagRo.Get("@pockets")) is IList pockets)
         {
             for (int i = 1; i < pockets.Count; i++) // El bolsillo 0 siempre está vacío
@@ -147,6 +125,7 @@ public class SaveParser
     private Pokemon MapRubyToPokemon(RubyObject ro)
     {
         Pokemon p = new Pokemon();
+        p.RubyObjectRef = ro;
 
         string speciesRaw = Unwrap(ro.Get("@species"))?.ToString() ?? "Desconocido";
         p.InternalSpecies = speciesRaw;

@@ -11,6 +11,15 @@ public class ItemSlot
 public class SaveDataModel
 {
     public object RootData { get; set; } 
+    
+    // --- CACHÉ DE VELOCIDAD EXTREMA ---
+    public System.Collections.IList RubyPartyList { get; set; } 
+    public System.Collections.IList RubyBoxesList { get; set; } 
+    public RubyObject RubyTrainer { get; set; }
+    public RubyObject RubyBag { get; set; }
+    public RubyObject RubyPokedex { get; set; }
+    // ----------------------------------
+
     public List<Pokemon> Party { get; set; } = new List<Pokemon>();
     public List<PCBox> Boxes { get; set; } = new List<PCBox>();
     public List<ItemSlot> Bag { get; set; } = new List<ItemSlot>();

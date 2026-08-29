@@ -2,6 +2,8 @@ using System.Collections.Generic;
 
 public class Pokemon
 {
+
+    public object RubyObjectRef { get; set; } // EL GPS DIRECTO A LA MEMORIA
     public string InternalSpecies { get; set; } 
     public string Species { get; set; }         
     public string Nickname { get; set; }

@@ -77,7 +77,11 @@ public class MainForm : Form
         tabMain.DragOver += (s, e) => { Point pt = tabMain.PointToClient(new Point(e.X, e.Y)); for (int i = 0; i < tabMain.TabPages.Count; i++) { if (tabMain.GetTabRect(i).Contains(pt)) { if (tabMain.SelectedIndex != i) tabMain.SelectedIndex = i; return; } } };
         
         tabParty = new TabPage("Equipo"); tabParty.AllowDrop = true;
-        pokeMenu = new ContextMenuStrip(); pokeMenu.Items.Add("Mover al Equipo / PC").Click += MovePokemonQuick_Click; pokeMenu.Items.Add("Cambiar Forma / Paradox").Click += ChangeForm_Click; pokeMenu.Items.Add("Eliminar Pokémon").Click += DeletePokemon_Click;
+        pokeMenu = new ContextMenuStrip(); 
+        pokeMenu.Items.Add("Mover al Equipo / PC").Click += MovePokemonQuick_Click; 
+        pokeMenu.Items.Add("Cambiar Forma / Paradox").Click += ChangeForm_Click; 
+        pokeMenu.Items.Add("👯 Duplicar Pokémon").Click += DuplicatePokemon_Click;
+        pokeMenu.Items.Add("Eliminar Pokémon").Click += DeletePokemon_Click;
         pokeMenu.Opening += (s, e) => { var pb = (s as ContextMenuStrip).SourceControl as PictureBox; if (pb == null || currentSaveData == null) { e.Cancel = true; return; } bool isParty = pb.Parent == tabParty; int slot = (int)pb.Tag; Pokemon p = isParty ? (slot < currentSaveData.Party.Count ? currentSaveData.Party[slot] : null) : currentSaveData.Boxes[currentBoxIndex].Slots[slot]; if (p == null) { e.Cancel = true; return; } pokeMenu.Items[0].Text = isParty ? "Enviar a la Caja del PC" : "Enviar al Equipo"; pokeMenu.Items[1].Visible = FormDatabase.HasFormsOrParadox(p.InternalSpecies, AppRoot); };
 
         for (int i = 0; i < 6; i++) {
@@ -185,7 +189,22 @@ public class MainForm : Form
 
         TabPage pageStats = new TabPage("Stats");
         pageStats.Controls.Add(new Label { Text = "Stat", Location = new Point(20, 15), Size = new Size(60, 20), Font = new Font(this.Font, FontStyle.Bold) }); pageStats.Controls.Add(new Label { Text = "IVs (0-31)", Location = new Point(120, 15), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) }); pageStats.Controls.Add(new Label { Text = "EVs (0-252)", Location = new Point(220, 15), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) });
-        for (int i = 0; i < 6; i++) { int yPos = 40 + (i * 35); lblStatNames[i] = new Label { Text = statNames[i], Location = new Point(20, yPos + 2), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) }; pageStats.Controls.Add(lblStatNames[i]); numIVs[i] = new NumericUpDown { Location = new Point(120, yPos), Size = new Size(60, 23), Minimum = 0, Maximum = 31 }; pageStats.Controls.Add(numIVs[i]); numEVs[i] = new NumericUpDown { Location = new Point(220, yPos), Size = new Size(60, 23), Minimum = 0, Maximum = 252 }; pageStats.Controls.Add(numEVs[i]); }
+        for (int i = 0; i < 6; i++) { 
+            int yPos = 40 + (i * 35); 
+            lblStatNames[i] = new Label { Text = statNames[i], Location = new Point(20, yPos + 2), Size = new Size(80, 20), Font = new Font(this.Font, FontStyle.Bold) }; 
+            pageStats.Controls.Add(lblStatNames[i]); 
+            
+            numIVs[i] = new NumericUpDown { Location = new Point(120, yPos), Size = new Size(60, 23), Minimum = 0, Maximum = 31 }; 
+            pageStats.Controls.Add(numIVs[i]); 
+            
+            numEVs[i] = new NumericUpDown { Location = new Point(220, yPos), Size = new Size(60, 23), Minimum = 0, Maximum = 252 }; 
+            
+            // --- AQUÍ CONECTAMOS EL FRENO Y EL TECLADO ---
+            numEVs[i].ValueChanged += EnforceEVLimits; 
+            numEVs[i].KeyUp += NudEvs_KeyUp;
+            
+            pageStats.Controls.Add(numEVs[i]);
+        }
         tabEditor.TabPages.Add(pageStats);
 
         TabPage pageMoves = new TabPage("Movimientos");
@@ -505,6 +524,8 @@ public class MainForm : Form
         }
     }
 
+    // # METODOS ANTIGUOS
+    /*
     // --- ESCÁNER DE RANURAS Y LECTOR PBS DE HABILIDADES ---
     private int GetRealAbilityIndex(long personalId) {
         if (currentSaveData == null || currentSaveData.RootData == null) return 0;
@@ -589,6 +610,7 @@ public class MainForm : Form
             }
         }
     }
+    */
 
     private string GetPBSAbility(string internalSpecies, int form, int abilityIndex, string appRoot) {
         string abil = "";
@@ -733,56 +755,34 @@ public class MainForm : Form
 
     // --- ESCRITURA PROFUNDA (ESTADÍSTICAS Y SUPER SHINY) ---
     // NOTA: Se eliminó el forzado de @nature para evitar que las naturalezas desaparezcan en el juego
-    private void ApplyDirectRubyEdits(object rootData, List<Pokemon> allPokes) {
-        var pkmObjects = FindAllObjectsByClassName(rootData, "PokeBattle_Pokemon");
-        if (pkmObjects.Count == 0) pkmObjects = FindAllObjectsByClassName(rootData, "Pokemon");
+    // --- ESCRITURA PROFUNDA ACELERADA (ESTADÍSTICAS Y SUPER SHINY) ---
+    private void ApplyDirectRubyEdits(List<Pokemon> allPokes) {
+        foreach (Pokemon pkm in allPokes) {
+            // Ya no buscamos, entramos directo a su memoria
+            if (pkm.RubyObjectRef is RubyObject ro && ro.Attributes != null) {
+                int[] newStats = CalculateStats(pkm, AppRoot);
+                ro.Attributes["@attack"] = newStats[1];
+                ro.Attributes["@defense"] = newStats[2];
+                ro.Attributes["@spatk"] = newStats[3];
+                ro.Attributes["@spdef"] = newStats[4];
+                ro.Attributes["@speed"] = newStats[5];
+                ro.Attributes["@totalhp"] = newStats[0];
+                ro.Attributes["@hp"] = newStats[0]; 
 
-        foreach (dynamic ro in pkmObjects) {
-            if (ro.Attributes != null) {
-                object pidObj = null;
-                if (ro.Attributes.ContainsKey("@personalID")) pidObj = ro.Attributes["@personalID"];
-                else if (ro.Attributes.ContainsKey("@personal_id")) pidObj = ro.Attributes["@personal_id"];
-                else if (ro.Attributes.ContainsKey("@pid")) pidObj = ro.Attributes["@pid"];
-                
-                // FIX CRÍTICO: Ya no le exigimos que tenga @hp previamente para que lo recalcule
-                if (pidObj != null) {
-                    long pid = SafeGetLong(Unwrap(pidObj));
-                    Pokemon pkm = allPokes.FirstOrDefault(p => p.PersonalID == pid);
-                    if (pkm != null) {
-                        int[] newStats = CalculateStats(pkm, AppRoot);
-                        ro.Attributes["@attack"] = newStats[1];
-                        ro.Attributes["@defense"] = newStats[2];
-                        ro.Attributes["@spatk"] = newStats[3];
-                        ro.Attributes["@spdef"] = newStats[4];
-                        ro.Attributes["@speed"] = newStats[5];
-                        ro.Attributes["@totalhp"] = newStats[0];
-                        ro.Attributes["@hp"] = newStats[0]; // Fuerza a llenarle la barra de vida
-
-                        if (pkm.IsSuperShiny) {
-                            ro.Attributes["@shiny"] = true;
-                            ro.Attributes["@radiant"] = true;
-                            ro.Attributes["@radiante"] = true;
-                            ro.Attributes["@super_shiny"] = true;
-                            ro.Attributes["@superShiny"] = true;
-                        } else if (pkm.IsShiny) {
-                            ro.Attributes["@shiny"] = true;
-                            if (ro.Attributes.ContainsKey("@radiant")) ro.Attributes.Remove("@radiant");
-                            if (ro.Attributes.ContainsKey("@radiante")) ro.Attributes.Remove("@radiante");
-                            if (ro.Attributes.ContainsKey("@super_shiny")) ro.Attributes.Remove("@super_shiny");
-                            if (ro.Attributes.ContainsKey("@superShiny")) ro.Attributes.Remove("@superShiny");
-                        } else {
-                            if (ro.Attributes.ContainsKey("@shiny")) ro.Attributes.Remove("@shiny");
-                            if (ro.Attributes.ContainsKey("@radiant")) ro.Attributes.Remove("@radiant");
-                            if (ro.Attributes.ContainsKey("@radiante")) ro.Attributes.Remove("@radiante");
-                            if (ro.Attributes.ContainsKey("@super_shiny")) ro.Attributes.Remove("@super_shiny");
-                            if (ro.Attributes.ContainsKey("@superShiny")) ro.Attributes.Remove("@superShiny");
-                        }
-
-                        // EXORCISMO DE CORRUPCIÓN GLOBAL
-                        ro.Attributes.Remove("@calc_stats");
-                        ro.Attributes.Remove("@calc_level");
-                    }
+                if (pkm.IsSuperShiny) {
+                    ro.Attributes["@shiny"] = true; ro.Attributes["@radiant"] = true;
+                    ro.Attributes["@radiante"] = true; ro.Attributes["@super_shiny"] = true; ro.Attributes["@superShiny"] = true;
+                } else if (pkm.IsShiny) {
+                    ro.Attributes["@shiny"] = true;
+                    ro.Attributes.Remove("@radiant"); ro.Attributes.Remove("@radiante");
+                    ro.Attributes.Remove("@super_shiny"); ro.Attributes.Remove("@superShiny");
+                } else {
+                    ro.Attributes.Remove("@shiny"); ro.Attributes.Remove("@radiant");
+                    ro.Attributes.Remove("@radiante"); ro.Attributes.Remove("@super_shiny"); ro.Attributes.Remove("@superShiny");
                 }
+
+                ro.Attributes.Remove("@calc_stats");
+                ro.Attributes.Remove("@calc_level");
             }
         }
     }
@@ -827,7 +827,7 @@ public class MainForm : Form
         try {
             ApplyCurrentEdits(); 
             SyncAllToRuby(); // <--- EL SEGURO DE VIDA: Sincroniza a la memoria de la partida ANTES de moverlo
-            SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData, pbs);
+            SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData, pbs);
             
             if (source.IsParty && !targetIsParty) { 
                 if (currentSaveData.Boxes[targetBox].Slots[targetSlot] != null) { writer.SwapPokemonInRuby(true, 0, source.SlotIndex, false, targetBox, targetSlot); } 
@@ -853,8 +853,8 @@ public class MainForm : Form
         } finally { this.Cursor = Cursors.Default; }
     }
     private void MovePokemonQuick_Click(object sender, EventArgs e) { var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox; if (pb == null) return; bool isParty = pb.Parent == tabParty; int slot = (int)pb.Tag; if (isParty) { int targetBox = -1, targetSlot = -1; for (int b = 0; b < currentSaveData.Boxes.Count; b++) { for (int s = 0; s < 30; s++) { if (currentSaveData.Boxes[b].Slots[s] == null) { targetBox = b; targetSlot = s; break; } } if (targetBox != -1) break; } if (targetBox == -1) { MessageBox.Show("Todas las cajas del PC están llenas.", "Aviso"); return; } Unified_DragDrop(new DragData { IsParty = true, BoxIndex = 0, SlotIndex = slot }, false, targetBox, targetSlot); } else { if (currentSaveData.Party.Count >= 6) { MessageBox.Show("El equipo ya está lleno.", "Aviso"); return; } Unified_DragDrop(new DragData { IsParty = false, BoxIndex = currentBoxIndex, SlotIndex = slot }, true, 0, currentSaveData.Party.Count); } }
-    private void DeletePokemon_Click(object sender, EventArgs e) { var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox; if (pb == null) return; bool isParty = pb.Parent == tabParty; int slot = (int)pb.Tag; if (MessageBox.Show("¿Eliminar de forma permanente?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) { lblStatus.Text = "⏳ Eliminando Pokémon..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { ApplyCurrentEdits(); SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData, pbs); if (isParty) writer.DeletePokemonInRuby(true, 0, slot); else writer.DeletePokemonInRuby(false, currentBoxIndex, slot); ReloadFromMemory(); ClearEditorUI(); lblStatus.Text = "Pokémon eliminado."; lblStatus.ForeColor = Color.Red; } finally { this.Cursor = Cursors.Default; } } }
-    private void BtnAddPokemon_Click(object sender, EventArgs e) { if (currentSaveData == null) return; int targetSlot = -1; for (int i = 0; i < 30; i++) { if (currentSaveData.Boxes[currentBoxIndex].Slots[i] == null) { targetSlot = i; break; } } if (targetSlot == -1) { MessageBox.Show("La caja actual está llena.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } using (AddPokemonForm form = new AddPokemonForm(pbs)) { if (form.ShowDialog() == DialogResult.OK) { lblStatus.Text = "⏳ Generando Pokémon e inyectando en la caja..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { ApplyCurrentEdits(); SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData, pbs); string intSpc = form.SelectedSpeciesInternal; string gr = pbs.SpeciesGrowthRates.ContainsKey(intSpc) ? pbs.SpeciesGrowthRates[intSpc] : "MEDIUMFAST"; int exactExp = PokemonUtils.CalculateExp(form.Level, gr); bool success = writer.AddPokemon(false, currentBoxIndex, intSpc, form.SelectedSpeciesName, form.Level, exactExp, "AUTO_0"); if (success) { ReloadFromMemory(); isEditingParty = false; currentSlotIndex = targetSlot; LoadPokemonToEditor(); lblStatus.Text = $"¡Pokémon añadido! Habilidad lista para el Modo Random."; lblStatus.ForeColor = Color.Green; } } finally { this.Cursor = Cursors.Default; } } } }
+    private void DeletePokemon_Click(object sender, EventArgs e) { var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox; if (pb == null) return; bool isParty = pb.Parent == tabParty; int slot = (int)pb.Tag; if (MessageBox.Show("¿Eliminar de forma permanente?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) { lblStatus.Text = "⏳ Eliminando Pokémon..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { ApplyCurrentEdits(); SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData, pbs); if (isParty) writer.DeletePokemonInRuby(true, 0, slot); else writer.DeletePokemonInRuby(false, currentBoxIndex, slot); ReloadFromMemory(); ClearEditorUI(); lblStatus.Text = "Pokémon eliminado."; lblStatus.ForeColor = Color.Red; } finally { this.Cursor = Cursors.Default; } } }
+    private void BtnAddPokemon_Click(object sender, EventArgs e) { if (currentSaveData == null) return; int targetSlot = -1; for (int i = 0; i < 30; i++) { if (currentSaveData.Boxes[currentBoxIndex].Slots[i] == null) { targetSlot = i; break; } } if (targetSlot == -1) { MessageBox.Show("La caja actual está llena.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } using (AddPokemonForm form = new AddPokemonForm(pbs)) { if (form.ShowDialog() == DialogResult.OK) { lblStatus.Text = "⏳ Generando Pokémon e inyectando en la caja..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { ApplyCurrentEdits(); SyncAllToRuby(); SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData, pbs); string intSpc = form.SelectedSpeciesInternal; string gr = pbs.SpeciesGrowthRates.ContainsKey(intSpc) ? pbs.SpeciesGrowthRates[intSpc] : "MEDIUMFAST"; int exactExp = PokemonUtils.CalculateExp(form.Level, gr); bool success = writer.AddPokemon(false, currentBoxIndex, intSpc, form.SelectedSpeciesName, form.Level, exactExp, "AUTO_0"); if (success) { ReloadFromMemory(); isEditingParty = false; currentSlotIndex = targetSlot; LoadPokemonToEditor(); lblStatus.Text = $"¡Pokémon añadido! Habilidad lista para el Modo Random."; lblStatus.ForeColor = Color.Green; } } finally { this.Cursor = Cursors.Default; } } } }
     private void BtnBoxChange_DragOver(object sender, DragEventArgs e) { if (e.Data.GetDataPresent(typeof(DragData)) && (DateTime.Now - lastBoxSwitch).TotalMilliseconds > 700) { Button btn = sender as Button; if (btn == btnNextBox && cbBoxSelector.SelectedIndex < cbBoxSelector.Items.Count - 1) cbBoxSelector.SelectedIndex++; else if (btn == btnPrevBox && cbBoxSelector.SelectedIndex > 0) cbBoxSelector.SelectedIndex--; lastBoxSwitch = DateTime.Now; } }
 
     private void UpdateBagItemDropdown() { 
@@ -897,6 +897,10 @@ public class MainForm : Form
         
         if (cbBagItems.Items.Contains(currentSelection)) cbBagItems.SelectedItem = currentSelection; 
         else if (cbBagItems.Items.Count > 0) cbBagItems.SelectedIndex = 0; 
+        else { 
+            cbBagItems.Text = ""; 
+            currentBagDropdownItems.Clear(); 
+        }
     }
     private string GetItemInternalIdFromDisplay(string display) {
         if (string.IsNullOrWhiteSpace(display)) return "";
@@ -921,7 +925,16 @@ public class MainForm : Form
         if (string.IsNullOrEmpty(intId)) return; 
         
         int pocket = tabBagPockets.SelectedIndex + 1; 
-        int qtyToAdd = (pocket == 4 || pocket == 8) ? 1 : (int)numBagQty.Value; 
+        
+        // --- SEGURO ANTI-INYECCIÓN CRUZADA ---
+        int truePocket = pbs.ItemPockets.ContainsKey(intId) ? pbs.ItemPockets[intId] : 1;
+        if (truePocket != pocket) {
+            MessageBox.Show($"¡Bloqueado! No puedes añadir este objeto aquí.\n'{cbBagItems.Text}' pertenece al bolsillo '{PocketNames[truePocket]}'.", "Bolsillo Incorrecto", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        // ------------------------------------------
+
+        int qtyToAdd = (pocket == 4 || pocket == 8) ? 1 : (int)numBagQty.Value;
         
         foreach (DataGridViewRow row in dgvPockets[pocket].Rows) { 
             if (qtyToAdd <= 0) break; 
@@ -1209,7 +1222,7 @@ public class MainForm : Form
                     List<Pokemon> allMyPokes = new List<Pokemon>();
                     allMyPokes.AddRange(currentSaveData.Party);
                     foreach(var box in currentSaveData.Boxes) { foreach(var pSlot in box.Slots) if (pSlot != null) allMyPokes.Add(pSlot); }
-                    ApplyDirectRubyEdits(currentSaveData.RootData, allMyPokes);
+                    ApplyDirectRubyEdits(allMyPokes);
 
                     ReloadFromMemory(); 
                     lblStatus.Text = $"Forma de {p.Nickname} actualizada correctamente."; lblStatus.ForeColor = Color.DarkViolet; 
@@ -1343,10 +1356,10 @@ public class MainForm : Form
             foreach(var box in currentSaveData.Boxes) {
                 foreach(var p in box.Slots) if (p != null) allMyPokes.Add(p);
             }
-            ApplyDirectRubyEdits(currentSaveData.RootData, allMyPokes);
+            ApplyDirectRubyEdits(allMyPokes);
 
             currentSavePath = targetPath;
-            SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData, pbs); writer.SyncBag(currentSaveData.Bag); 
+            SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData, pbs); writer.SyncBag(currentSaveData.Bag); 
             SyncMoneySafely((long)numMoney.Value);
 
             // LIMPIADOR DE "DESCONOCIDAS" JUSTO ANTES DE GENERAR EL ARCHIVO
@@ -1365,8 +1378,14 @@ public class MainForm : Form
         } catch (Exception ex) { lblStatus.Text = $"Error crítico al guardar. Revisa errorlog.txt"; lblStatus.ForeColor = Color.Red; LogError(ex, "BtnSave_Click"); } finally { this.Cursor = Cursors.Default; }
     }
 
-    private void SyncAllToRuby() { SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData.RootData, pbs); for (int i = 0; i < currentSaveData.Party.Count; i++) writer.SyncPokemon(currentSaveData.Party[i], true, 0, i); foreach (var box in currentSaveData.Boxes) for (int i = 0; i < 30; i++) if (box.Slots[i] != null) writer.SyncPokemon(box.Slots[i], false, box.BoxIndex - 1, i); }
-    private void ReloadFromMemory() { isUpdatingUI = true; SaveParser parser = new SaveParser(currentSavePath, pbs); currentSaveData = parser.ParseSave(currentSaveData.RootData); isUpdatingUI = false; RefreshPartyGrid(); RefreshPCGrid(); LoadPokemonToEditor(); }
+    private void SyncAllToRuby() { SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData, pbs); for (int i = 0; i < currentSaveData.Party.Count; i++) writer.SyncPokemon(currentSaveData.Party[i], true, 0, i); foreach (var box in currentSaveData.Boxes) for (int i = 0; i < 30; i++) if (box.Slots[i] != null) writer.SyncPokemon(box.Slots[i], false, box.BoxIndex - 1, i); }
+    private void ReloadFromMemory() { 
+        isUpdatingUI = true; 
+        SaveParser parser = new SaveParser(currentSavePath, pbs); 
+        currentSaveData = parser.ParseSave(currentSaveData); // <--- ¡AQUÍ ESTÁ LA MAGIA!
+        isUpdatingUI = false; 
+        RefreshPartyGrid(); RefreshPCGrid(); LoadPokemonToEditor(); 
+    }
     private void LogError(Exception ex, string context = "") { try { using (StreamWriter sw = new StreamWriter(Path.Combine(AppRoot, "errorlog.txt"), true)) sw.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] ERROR: {context}\n{ex.ToString()}\n{new string('-', 50)}"); } catch { } }
 
     private string GetRandomizedAbility(string internalSpecies, int form, int abilityIndex) {
@@ -1802,6 +1821,7 @@ public class MainForm : Form
         }
     }
 
+    /*
     private string GetRealNatureFromRuby(long personalId) {
         if (currentSaveData == null || currentSaveData.RootData == null) return null;
         var pkmObjects = FindAllObjectsByClassName(currentSaveData.RootData, "PokeBattle_Pokemon");
@@ -1833,7 +1853,9 @@ public class MainForm : Form
         }
         return null;
     }
+   */ 
 
+    /*
     private void SetRealNatureInRuby(long personalId, string newNatureInternal) {
         if (currentSaveData == null || currentSaveData.RootData == null || string.IsNullOrEmpty(newNatureInternal)) return;
         var pkmObjects = FindAllObjectsByClassName(currentSaveData.RootData, "PokeBattle_Pokemon");
@@ -1852,6 +1874,202 @@ public class MainForm : Form
                     if (ro.Attributes.ContainsKey("@nature_for_stats")) ro.Attributes["@nature_for_stats"] = finalVal;
                     if (ro.Attributes.ContainsKey("@calc_nature")) ro.Attributes["@calc_nature"] = finalVal;
                 }
+            }
+        }
+    } 
+    */
+
+    /*
+    // Motor de búsqueda ultra-rápido (0.01 segundos)
+    private RubyObject GetFastRubyPokemon(long personalId) {
+        if (currentSaveData == null || currentSaveData.RootData == null) return null;
+        
+        // 1. Buscar en el equipo
+        var trainer = FindObjectByClassName(currentSaveData.RootData, "PokeBattle_Trainer") ?? FindObjectByClassName(currentSaveData.RootData, "Player");
+        if (trainer != null && trainer.Attributes.ContainsKey("@party")) {
+            if (Unwrap(trainer.Attributes["@party"]) is IList party) {
+                foreach (var item in party) {
+                    if (item is RubyObject ro && ro.Attributes != null) {
+                        object pidObj = ro.Attributes.ContainsKey("@personalID") ? ro.Attributes["@personalID"] : (ro.Attributes.ContainsKey("@personal_id") ? ro.Attributes["@personal_id"] : (ro.Attributes.ContainsKey("@pid") ? ro.Attributes["@pid"] : null));
+                        if (pidObj != null && SafeGetLong(Unwrap(pidObj)) == personalId) return ro;
+                    }
+                }
+            }
+        }
+        
+        // 2. Buscar en el PC
+        var pc = FindObjectByClassName(currentSaveData.RootData, "PokemonStorage") ?? FindObjectByClassName(currentSaveData.RootData, "PC");
+        if (pc != null && pc.Attributes.ContainsKey("@boxes")) {
+            if (Unwrap(pc.Attributes["@boxes"]) is IList boxes) {
+                foreach(var box in boxes) {
+                    if (box is RubyObject boxRo && boxRo.Attributes.ContainsKey("@pokemon")) {
+                        if (Unwrap(boxRo.Attributes["@pokemon"]) is IList pokes) {
+                            foreach (var item in pokes) {
+                                if (item is RubyObject ro && ro.Attributes != null) {
+                                    object pidObj = ro.Attributes.ContainsKey("@personalID") ? ro.Attributes["@personalID"] : (ro.Attributes.ContainsKey("@personal_id") ? ro.Attributes["@personal_id"] : (ro.Attributes.ContainsKey("@pid") ? ro.Attributes["@pid"] : null));
+                                    if (pidObj != null && SafeGetLong(Unwrap(pidObj)) == personalId) return ro;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }*/
+
+    // Buscador INSTANTÁNEO usando el nuevo GPS
+    private RubyObject GetFastRubyPokemon(long personalId) {
+        if (currentSaveData == null) return null;
+        Pokemon p = currentSaveData.Party.FirstOrDefault(x => x != null && x.PersonalID == personalId);
+        if (p == null) {
+            foreach(var box in currentSaveData.Boxes) {
+                p = box.Slots.FirstOrDefault(x => x != null && x.PersonalID == personalId);
+                if (p != null) break;
+            }
+        }
+        return p?.RubyObjectRef as RubyObject;
+    }
+
+    private int GetRealAbilityIndex(long personalId) {
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null && ro.Attributes.ContainsKey("@ability_index")) return SafeGetInt(Unwrap(ro.Attributes["@ability_index"]));
+        return 0;
+    }
+    private void SetRealAbilityIndex(long personalId, int newIndex) {
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null) ro.Attributes["@ability_index"] = newIndex;
+    }
+    private string GetRealAbilityNameFromRuby(long personalId) {
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null && ro.Attributes.ContainsKey("@ability")) return Unwrap(ro.Attributes["@ability"])?.ToString();
+        return null;
+    }
+    private void SetRealAbilityNameInRuby(long personalId, string newAbilityInternal) {
+        if (string.IsNullOrEmpty(newAbilityInternal)) return;
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null) ro.Attributes["@ability"] = newAbilityInternal;
+    }
+    private void ClearAbilityNameInRuby(long personalId) {
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null && ro.Attributes.ContainsKey("@ability")) ro.Attributes.Remove("@ability");
+    }
+
+    private string GetRealNatureFromRuby(long personalId) {
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null) {
+            if (ro.Attributes.ContainsKey("@nature_for_stats") && ro.Attributes["@nature_for_stats"] != null) {
+                string mint = Unwrap(ro.Attributes["@nature_for_stats"]).ToString().Replace(":", "").Trim();
+                if (!string.IsNullOrEmpty(mint) && mint != "RUBYOBJECT") return mint;
+            }
+            if (ro.Attributes.ContainsKey("@calc_nature") && ro.Attributes["@calc_nature"] != null) {
+                string calc = Unwrap(ro.Attributes["@calc_nature"]).ToString().Replace(":", "").Trim();
+                if (!string.IsNullOrEmpty(calc) && calc != "RUBYOBJECT") return calc;
+            }
+            if (ro.Attributes.ContainsKey("@nature") && ro.Attributes["@nature"] != null) {
+                string baseNat = Unwrap(ro.Attributes["@nature"]).ToString().Replace(":", "").Trim();
+                if (!string.IsNullOrEmpty(baseNat) && baseNat != "RUBYOBJECT") return baseNat;
+            }
+        }
+        return null;
+    }
+
+    private void SetRealNatureInRuby(long personalId, string newNatureInternal) {
+        RubyObject ro = GetFastRubyPokemon(personalId);
+        if (ro != null && !string.IsNullOrEmpty(newNatureInternal)) {
+            object finalVal = new RubySymbol(newNatureInternal);
+            ro.Attributes["@nature"] = finalVal;
+            if (ro.Attributes.ContainsKey("@nature_for_stats")) ro.Attributes["@nature_for_stats"] = finalVal;
+            if (ro.Attributes.ContainsKey("@calc_nature")) ro.Attributes["@calc_nature"] = finalVal;
+        }
+    }
+
+    private void DuplicatePokemon_Click(object sender, EventArgs e) { 
+        var pb = ((sender as ToolStripItem).Owner as ContextMenuStrip).SourceControl as PictureBox; 
+        if (pb == null || currentSaveData == null) return; 
+        
+        bool isParty = pb.Parent == tabParty; 
+        int slot = (int)pb.Tag; 
+        
+        Pokemon p = isParty ? (slot < currentSaveData.Party.Count ? currentSaveData.Party[slot] : null) : currentSaveData.Boxes[currentBoxIndex].Slots[slot]; 
+        if (p == null) return; 
+
+        if (isParty) {
+            if (currentSaveData.Party.Count >= 6) { MessageBox.Show("El equipo ya está lleno. Libera un espacio para clonarlo.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        } else {
+            bool hasSpace = false;
+            for (int i = 0; i < 30; i++) { if (currentSaveData.Boxes[currentBoxIndex].Slots[i] == null) { hasSpace = true; break; } }
+            if (!hasSpace) { MessageBox.Show("La caja actual del PC está llena. Ve a otra caja para clonarlo.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        }
+
+        lblStatus.Text = "⏳ Clonando Pokémon..."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); 
+        try { 
+            ApplyCurrentEdits(); 
+            SyncAllToRuby(); 
+            
+            SaveWriter writer = new SaveWriter(currentSavePath, currentSaveData, pbs); 
+            
+            if (isParty) {
+                writer.ClonePokemonInRuby(true, 0, slot, true, 0, currentSaveData.Party.Count); 
+            } else {
+                int targetSlot = -1;
+                for (int i = 0; i < 30; i++) { if (currentSaveData.Boxes[currentBoxIndex].Slots[i] == null) { targetSlot = i; break; } }
+                writer.ClonePokemonInRuby(false, currentBoxIndex, slot, false, currentBoxIndex, targetSlot); 
+            }
+            
+            ReloadFromMemory(); 
+            lblStatus.Text = $"¡{p.Nickname} clonado con éxito!"; lblStatus.ForeColor = Color.Green; 
+        } catch (Exception ex) {
+            MessageBox.Show("Error al clonar: " + ex.Message, "Error Crítico", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        } finally { this.Cursor = Cursors.Default; } 
+    }
+
+    // --- FRENO AUTOMÁTICO DE EVs (MÁX 510 TOTALES / 252 INDIVIDUAL) ---
+    // --- 1. FRENO AUTOMÁTICO SEGURO ---
+    private void EnforceEVLimits(object sender, EventArgs e) {
+        if (isUpdatingUI) return; 
+        
+        NumericUpDown activeNud = sender as NumericUpDown;
+        if (activeNud == null) return;
+
+        try {
+            isUpdatingUI = true; 
+
+            // Regla de 252 individual
+            if (activeNud.Value > 252) activeNud.Value = 252;
+
+            int total = 0;
+            for (int i = 0; i < 6; i++) {
+                if (numEVs[i].Value > 252) numEVs[i].Value = 252;
+                total += (int)numEVs[i].Value;
+            }
+
+            // Regla de 510 global
+            if (total > 510) {
+                decimal newValue = activeNud.Value - (total - 510);
+                if (newValue < 0) newValue = 0; // ¡Evita el crasheo de números negativos!
+                activeNud.Value = newValue;
+            }
+        } 
+        finally {
+            // El finally asegura que el editor JAMÁS se quede bloqueado, pase lo que pase
+            isUpdatingUI = false; 
+        }
+    }
+
+    // --- 2. LECTOR DE TECLADO INSTANTÁNEO ---
+    private void NudEvs_KeyUp(object sender, KeyEventArgs e) {
+        if (isUpdatingUI) return;
+        NumericUpDown nud = sender as NumericUpDown;
+        
+        // Lee el texto mientras escribes y fuerza la validación al instante
+        if (nud != null && decimal.TryParse(nud.Text, out decimal result)) {
+            if (result > 252) {
+                nud.Value = 252;
+                nud.Text = "252";
+                nud.Select(nud.Text.Length, 0); // Mantiene el cursor al final (Corregido)
+            } else {
+                nud.Value = result; // Esto dispara el EnforceEVLimits al instante
             }
         }
     }

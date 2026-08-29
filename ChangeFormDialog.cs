@@ -52,48 +52,62 @@ public class ChangeFormDialog : Form
             }
         }
 
+        // 1. Añadimos las Paradojas si las tiene
         if (currentGroup != null) 
         {
             foreach (string spc in currentGroup) 
             {
                 string name = pbs.GetName(pbs.Species, spc, spc);
+                // Solo marcamos las que son de otra especie como Paradoja
+                string suffix = (spc != p.InternalSpecies) ? " (Variante/Paradoja)" : "";
                 cbOptions.Items.Add(new FormOption { 
-                    DisplayName = name + (spc == currentSpc ? " (Actual)" : " (Variante/Paradoja)"), 
+                    DisplayName = name + suffix, 
                     FormIndex = 0, 
                     SpeciesInternal = spc 
                 });
             }
-            cbOptions.SelectedIndex = Array.IndexOf(currentGroup, currentSpc);
         } 
         else 
         {
+            // Si no tiene paradojas, agregamos su forma base normal
             cbOptions.Items.Add(new FormOption { 
                 DisplayName = "Forma Base", 
                 FormIndex = 0, 
                 SpeciesInternal = currentSpc 
             });
-
-            string basePath = Path.Combine(MainForm.AppRoot, "Graphics", "Pokemon", "Icons");
-            int maxFormsToScan = 30; 
-            int selectedIdx = 0;
-
-            for (int i = 1; i <= maxFormsToScan; i++)
-            {
-                if (File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}.png")) || 
-                    File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}_s.png")) || 
-                    File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}s.png")))
-                {
-                    cbOptions.Items.Add(new FormOption { 
-                        DisplayName = FormDatabase.GetFormName(currentSpc, i), 
-                        FormIndex = i, 
-                        SpeciesInternal = currentSpc 
-                    });
-                    
-                    if (p.Form == i) selectedIdx = cbOptions.Items.Count - 1;
-                }
-            }
-            cbOptions.SelectedIndex = selectedIdx;
         }
+
+        // 2. ESCANEAMOS MEGAS Y FORMAS EXTRAS
+        string basePath = Path.Combine(MainForm.AppRoot, "Graphics", "Pokemon", "Icons");
+        int maxFormsToScan = 30; 
+
+        for (int i = 1; i <= maxFormsToScan; i++)
+        {
+            if (File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}.png")) || 
+                File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}_s.png")) || 
+                File.Exists(Path.Combine(basePath, $"{currentSpc}_{i}s.png")))
+            {
+                cbOptions.Items.Add(new FormOption { 
+                    DisplayName = FormDatabase.GetFormName(currentSpc, i), 
+                    FormIndex = i, 
+                    SpeciesInternal = currentSpc 
+                });
+            }
+        }
+
+        // 3. Etiquetar EXACTAMENTE la forma actual y seleccionarla
+        int selectedIdx = 0;
+        for(int i = 0; i < cbOptions.Items.Count; i++) {
+            var opt = (FormOption)cbOptions.Items[i];
+            
+            // Verificamos que coincida tanto la especie como el ID de la forma
+            if (opt.SpeciesInternal == p.InternalSpecies && opt.FormIndex == p.Form) {
+                opt.DisplayName += " (Actual)"; // Le pegamos la etiqueta a la forma exacta
+                selectedIdx = i;
+                break;
+            }
+        }
+        if (cbOptions.Items.Count > 0) cbOptions.SelectedIndex = selectedIdx;
 
         Button btnOk = new Button { 
             Text = "Aplicar Transformación", 

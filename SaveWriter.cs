@@ -7,12 +7,14 @@ public class SaveWriter
 {
     private readonly string _savePath;
     private readonly object _rootRubyData;
-    private readonly PBSReader _pbs; // NUEVO
+    private readonly SaveDataModel _model; // NUEVO CACHÉ
+    private readonly PBSReader _pbs; 
 
-    public SaveWriter(string savePath, object rootRubyData, PBSReader pbs = null) 
+    public SaveWriter(string savePath, SaveDataModel model, PBSReader pbs = null) 
     { 
         _savePath = savePath; 
-        _rootRubyData = rootRubyData;
+        _model = model;
+        _rootRubyData = model.RootData;
         _pbs = pbs;
     }
 
@@ -56,10 +58,25 @@ public class SaveWriter
         IList list = GetRubyList(isParty, boxIndex);
         if (list == null) return false;
 
-        RubyObject templatePoke = FindObjectByClass(_rootRubyData, "PokeBattle_Pokemon") ?? FindObjectWithAttribute(_rootRubyData, "@species");
+        // Buscador Instantáneo del Pokémon Molde
+        RubyObject templatePoke = null;
+        if (_model.RubyPartyList != null && _model.RubyPartyList.Count > 0)
+            templatePoke = Unwrap(_model.RubyPartyList[0]) as RubyObject;
+        
+        if (templatePoke == null && _model.RubyBoxesList != null) {
+            foreach(var boxObj in _model.RubyBoxesList) {
+                if (Unwrap(boxObj) is RubyObject bRo && Unwrap(bRo.Get("@pokemon") ?? bRo.Get("@pokemons")) is IList pList) {
+                    foreach(var pObj in pList) {
+                        if (pObj != null) { templatePoke = Unwrap(pObj) as RubyObject; break; }
+                    }
+                    if (templatePoke != null) break;
+                }
+            }
+        }
         if (templatePoke == null) return false;
 
         RubyObject newPoke = (RubyObject)CloneRubyObject(templatePoke);
+        // ... (El resto del método AddPokemon se queda igual, no lo borres)
         
         newPoke.Set("@species", new RubySymbol(internalSpecies.ToUpper()));
         
@@ -185,37 +202,23 @@ public class SaveWriter
         }
     }
 
-    public long GetMoney()
-    {
-        RubyObject trainerObj = FindObjectByClass(_rootRubyData, "PokeBattle_Trainer") ?? FindObjectByClass(_rootRubyData, "Player");
-        if (trainerObj != null && trainerObj.Attributes.ContainsKey("@money"))
-        {
-            object moneyObj = Unwrap(trainerObj.Get("@money"));
-            if (moneyObj != null) return Convert.ToInt64(moneyObj); // Usamos ToInt64 para billones
+    public long GetMoney() {
+        if (_model.RubyTrainer != null && _model.RubyTrainer.Attributes.ContainsKey("@money")) {
+            object moneyObj = Unwrap(_model.RubyTrainer.Get("@money"));
+            if (moneyObj != null) return Convert.ToInt64(moneyObj);
         }
         return 0;
     }
 
-    public void SyncMoney(long money)
-    {
-        RubyObject trainerObj = FindObjectByClass(_rootRubyData, "PokeBattle_Trainer") ?? FindObjectByClass(_rootRubyData, "Player");
-        if (trainerObj != null)
-        {
-            trainerObj.Set("@money", money);
-        }
+    public void SyncMoney(long money) {
+        if (_model.RubyTrainer != null) _model.RubyTrainer.Set("@money", money);
     }
 
-    public void SyncBag(List<ItemSlot> bag) 
-    {
-        RubyObject bagRo = FindObjectByClass(_rootRubyData, "PokemonBag");
-        if (bagRo != null && Unwrap(bagRo.Get("@pockets")) is IList pockets)
-        {
+    public void SyncBag(List<ItemSlot> bag) {
+        if (_model.RubyBag != null && Unwrap(_model.RubyBag.Get("@pockets")) is IList pockets) {
             for (int i = 1; i < pockets.Count; i++) (Unwrap(pockets[i]) as IList)?.Clear();
-            
-            foreach (var item in bag)
-            {
-                if (item.Pocket >= 1 && item.Pocket < pockets.Count)
-                {
+            foreach (var item in bag) {
+                if (item.Pocket >= 1 && item.Pocket < pockets.Count) {
                     if (Unwrap(pockets[item.Pocket]) is IList pocket)
                         pocket.Add(new List<object> { new RubySymbol(item.InternalName), item.Quantity });
                 }
@@ -352,21 +355,14 @@ public class SaveWriter
         list2[slot2] = temp;
     }
 
-    private void UnlockPokedex(string internalSpecies)
-    {
+    private void UnlockPokedex(string internalSpecies) {
         if (string.IsNullOrWhiteSpace(internalSpecies)) return;
-        
-        RubyObject pokedex = FindObjectByClass(_rootRubyData, "PlayerPokedex") 
-                          ?? FindObjectWithAttribute(_rootRubyData, "@owned");
-        
+        RubyObject pokedex = _model.RubyPokedex; // ¡Búsqueda O(1) Instantánea!
         if (pokedex == null) return;
 
         if (_pbs != null) {
             string current = internalSpecies.ToUpper();
-            // Buscar al ancestro más antiguo de la familia
-            while (_pbs.PreEvolutions.ContainsKey(current)) {
-                current = _pbs.PreEvolutions[current];
-            }
+            while (_pbs.PreEvolutions.ContainsKey(current)) current = _pbs.PreEvolutions[current];
             UnlockSpeciesRecursive(current, pokedex);
         } else {
             UnlockSingleSpecies(internalSpecies.ToUpper(), pokedex);
@@ -398,18 +394,11 @@ public class SaveWriter
 
     private IList GetRubyList(bool isParty, int boxIndex)
     {
-        if (isParty)
-        {
-            RubyObject trainerObj = FindObjectByClass(_rootRubyData, "PokeBattle_Trainer") ?? FindObjectByClass(_rootRubyData, "Player") ?? FindObjectWithAttribute(_rootRubyData, "@party");
-            return trainerObj != null ? Unwrap(trainerObj.Get("@party")) as IList : null;
-        }
-        else
-        {
-            RubyObject storageObj = FindObjectByClass(_rootRubyData, "PokemonStorage") ?? FindObjectWithAttribute(_rootRubyData, "@boxes");
-            if (storageObj != null && Unwrap(storageObj.Get("@boxes")) is IList boxesList && boxIndex >= 0 && boxIndex < boxesList.Count)
-            {
-                if (Unwrap(boxesList[boxIndex]) is RubyObject boxObj)
-                {
+        if (isParty) {
+            return _model.RubyPartyList; // ¡Respuesta instantánea!
+        } else {
+            if (_model.RubyBoxesList != null && boxIndex >= 0 && boxIndex < _model.RubyBoxesList.Count) {
+                if (Unwrap(_model.RubyBoxesList[boxIndex]) is RubyObject boxObj) {
                     return Unwrap(boxObj.Get("@pokemon") ?? boxObj.Get("@pokemons")) as IList;
                 }
             }
@@ -503,4 +492,36 @@ public class SaveWriter
         else if (node is IDictionary dict) { foreach (var item in dict.Values) { var found = FindObjectWithAttribute(item, attrName, visited); if (found != null) return found; } }
         return null;
     }
+
+    /*
+    private object DeepCloneRuby(object obj) {
+        if (obj == null) return null;
+        if (obj is string || obj is int || obj is long || obj is bool || obj is byte || obj is float || obj is double) return obj; 
+        if (obj is RubySymbol sym) return new RubySymbol(sym.Value);
+        if (obj is RubyString str) return new RubyString(str.Value);
+        
+        if (obj is IList list) {
+            var newList = new List<object>();
+            foreach(var item in list) newList.Add(DeepCloneRuby(item));
+            return newList;
+        }
+        if (obj is IDictionary dict) {
+            var newDict = new Dictionary<object, object>();
+            foreach(DictionaryEntry kvp in dict) newDict.Add(DeepCloneRuby(kvp.Key), DeepCloneRuby(kvp.Value));
+            return newDict;
+        }
+        if (obj is RubyObject ro) {
+            var newRo = new RubyObject(ro.ClassName);
+            if (ro.Attributes != null) {
+                newRo.Attributes = new Dictionary<object, object>();
+                foreach(var kvp in ro.Attributes) {
+                    newRo.Attributes.Add(DeepCloneRuby(kvp.Key), DeepCloneRuby(kvp.Value));
+                }
+            }
+            return newRo;
+        }
+        return obj; 
+    }
+    */
+    
 }
