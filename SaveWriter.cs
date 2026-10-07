@@ -78,7 +78,8 @@ public class SaveWriter
         RubyObject newPoke = (RubyObject)CloneRubyObject(templatePoke);
         // ... (El resto del método AddPokemon se queda igual, no lo borres)
         
-        newPoke.Set("@species", new RubySymbol(internalSpecies.ToUpper()));
+        string canonicalSpecies = PokemonUtils.FixSpeciesCase(internalSpecies, _pbs);
+        newPoke.Set("@species", new RubySymbol(canonicalSpecies));
         
         newPoke.Set("@name", null);
         
@@ -222,7 +223,7 @@ public class SaveWriter
             foreach (var item in bag) {
                 if (item.Pocket >= 1 && item.Pocket < pockets.Count) {
                     if (Unwrap(pockets[item.Pocket]) is IList pocket)
-                        pocket.Add(new List<object> { new RubySymbol(item.InternalName), item.Quantity });
+                        pocket.Add(new List<object> { new RubySymbol(PokemonUtils.FixItemCase(item.InternalName, _pbs)), item.Quantity });
                 }
             }
         }
@@ -258,7 +259,7 @@ public class SaveWriter
         }
         
         pokeRo.Set("@form", p.Form);
-        pokeRo.Set("@species", new RubySymbol(p.InternalSpecies.ToUpper())); 
+        pokeRo.Set("@species", new RubySymbol(PokemonUtils.FixSpeciesCase(p.InternalSpecies, _pbs))); 
 
         pokeRo.Set("@level", p.Level);
         pokeRo.Set("@exp", p.Exp);
@@ -286,7 +287,7 @@ public class SaveWriter
         if (string.IsNullOrWhiteSpace(p.InternalHeldItem) || p.InternalHeldItem.Equals("Ninguno", StringComparison.OrdinalIgnoreCase))
             pokeRo.Set("@item", null); 
         else 
-            pokeRo.Set("@item", new RubySymbol(p.InternalHeldItem.ToUpper())); 
+            pokeRo.Set("@item", new RubySymbol(PokemonUtils.FixItemCase(p.InternalHeldItem, _pbs))); 
 
         if (!string.IsNullOrEmpty(p.InternalNature)) {
             object oldNat = pokeRo.Get("@nature") ?? pokeRo.Get("@initial_nature");
@@ -362,12 +363,13 @@ public class SaveWriter
         RubyObject pokedex = _model.RubyPokedex; // ¡Búsqueda O(1) Instantánea!
         if (pokedex == null) return;
 
+        string canonical = PokemonUtils.FixSpeciesCase(internalSpecies, _pbs);
         if (_pbs != null) {
-            string current = internalSpecies.ToUpper();
+            string current = canonical;
             while (_pbs.PreEvolutions.ContainsKey(current)) current = _pbs.PreEvolutions[current];
             UnlockSpeciesRecursive(current, pokedex);
         } else {
-            UnlockSingleSpecies(internalSpecies.ToUpper(), pokedex);
+            UnlockSingleSpecies(canonical, pokedex);
         }
     }
 
@@ -376,7 +378,7 @@ public class SaveWriter
         if (visited.Contains(species)) return;
         visited.Add(species);
 
-        UnlockSingleSpecies(species, pokedex);
+        UnlockSingleSpecies(PokemonUtils.FixSpeciesCase(species, _pbs), pokedex);
         if (_pbs.Evolutions.TryGetValue(species, out var evos)) {
             foreach(var evo in evos) UnlockSpeciesRecursive(evo, pokedex, visited);
         }

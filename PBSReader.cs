@@ -125,7 +125,7 @@ public class PBSReader
                     string[] evData = val.Split(',');
                     List<string> evos = new List<string>();
                     for (int i = 0; i < evData.Length; i += 3) {
-                        if (!string.IsNullOrWhiteSpace(evData[i])) evos.Add(evData[i].Trim().ToUpper());
+                        if (!string.IsNullOrWhiteSpace(evData[i])) evos.Add(PokemonUtils.FixSpeciesCase(evData[i].Trim(), this));
                     }
                     Evolutions[currentId] = evos;
                 }

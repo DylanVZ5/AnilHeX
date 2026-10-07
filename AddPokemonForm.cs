@@ -41,7 +41,7 @@ public class AddPokemonForm : Form
             
             if (match.Key != null) {
                 SelectedSpeciesName = match.Value;
-                SelectedSpeciesInternal = match.Key.ToUpper(); // Fuerza SIEMPRE a mayúsculas para evitar crasheos en Ruby
+                SelectedSpeciesInternal = PokemonUtils.FixSpeciesCase(match.Key, pbs);
                 Level = (int)numLvl.Value;
                 this.DialogResult = DialogResult.OK;
                 this.Close();

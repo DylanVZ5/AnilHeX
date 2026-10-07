@@ -105,7 +105,8 @@ public class SaveParser
                     {
                         if (Unwrap(itemObj) is IList itemPair && itemPair.Count == 2)
                         {
-                            string intName = Unwrap(itemPair[0]).ToString().Replace(":", "").Replace("@", "").Trim();
+                            string rawItemName = Unwrap(itemPair[0]).ToString().Replace(":", "").Replace("@", "").Trim();
+                            string intName = PokemonUtils.FixItemCase(rawItemName, _pbs);
                             int qty = SafeGetInt(Unwrap(itemPair[1]));
                             model.Bag.Add(new ItemSlot { 
                                 InternalName = intName, 
@@ -128,8 +129,8 @@ public class SaveParser
         p.RubyObjectRef = ro;
 
         string speciesRaw = Unwrap(ro.Get("@species"))?.ToString() ?? "Desconocido";
-        p.InternalSpecies = speciesRaw;
-        p.Species = _pbs != null ? _pbs.GetName(_pbs.Species, speciesRaw, speciesRaw) : speciesRaw;
+        p.InternalSpecies = PokemonUtils.FixSpeciesCase(speciesRaw, _pbs);
+        p.Species = _pbs != null ? _pbs.GetName(_pbs.Species, p.InternalSpecies, p.InternalSpecies) : p.InternalSpecies;
         
         p.Nickname = Unwrap(ro.Get("@name"))?.ToString() ?? p.Species;
         p.Level = SafeGetInt(Unwrap(ro.Get("@level")), 1);
@@ -154,8 +155,8 @@ public class SaveParser
         p.InternalNature = Unwrap(ro.Get("@nature") ?? ro.Get("@initial_nature"))?.ToString()?.Replace(":", "")?.Replace("@", "")?.Trim();
 
         string itemRaw = Unwrap(ro.Get("@item"))?.ToString() ?? "Ninguno";
-        p.InternalHeldItem = itemRaw;
-        p.HeldItem = _pbs != null ? _pbs.GetName(_pbs.Items, itemRaw, itemRaw) : itemRaw;
+        p.InternalHeldItem = PokemonUtils.FixItemCase(itemRaw, _pbs);
+        p.HeldItem = _pbs != null ? _pbs.GetName(_pbs.Items, p.InternalHeldItem, p.InternalHeldItem) : p.InternalHeldItem;
         
         p.Happiness = SafeGetInt(Unwrap(ro.Get("@happiness")));
         
