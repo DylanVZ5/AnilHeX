@@ -85,8 +85,10 @@ public class SaveWriter
         newPoke.Set("@level", level);
         newPoke.Set("@exp", exp); 
         newPoke.Set("@shiny", false);
-        if (newPoke.Attributes.ContainsKey("@superShiny")) newPoke.Set("@superShiny", false);
-        else newPoke.Set("@super_shiny", false);
+        newPoke.Set("@super_shiny", false);
+        newPoke.Attributes.Remove("@superShiny");
+        newPoke.Attributes.Remove("@radiant");
+        newPoke.Attributes.Remove("@radiante");
         
         // LIMPIEZA PROFUNDA DEL POKÉMON MOLDE
         newPoke.Attributes.Remove("@calc_level");
@@ -275,10 +277,11 @@ public class SaveWriter
         }
         pokeRo.Set("@gender", genderVal);
 
-        pokeRo.Set("@shiny", p.IsShiny);
-        
-        if (pokeRo.Attributes.ContainsKey("@superShiny")) pokeRo.Set("@superShiny", p.IsSuperShiny);
-        else pokeRo.Set("@super_shiny", p.IsSuperShiny);
+        pokeRo.Set("@shiny", p.IsShiny || p.IsSuperShiny);
+        pokeRo.Set("@super_shiny", p.IsSuperShiny);
+        pokeRo.Attributes.Remove("@superShiny");
+        pokeRo.Attributes.Remove("@radiant");
+        pokeRo.Attributes.Remove("@radiante");
 
         if (string.IsNullOrWhiteSpace(p.InternalHeldItem) || p.InternalHeldItem.Equals("Ninguno", StringComparison.OrdinalIgnoreCase))
             pokeRo.Set("@item", null); 
@@ -313,7 +316,6 @@ public class SaveWriter
             pokeRo.Set("@ability", abSym);
             if (pokeRo.Attributes.ContainsKey("@ability_id")) pokeRo.Set("@ability_id", abSym);
             
-            pokeRo.Attributes.Remove("@ability_index");
             pokeRo.Attributes.Remove("@abilityNum");
             pokeRo.Attributes.Remove("@hiddenAbility");
         }

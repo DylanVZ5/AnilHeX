@@ -137,8 +137,8 @@ public class SaveParser
         int genderByte = SafeGetInt(Unwrap(ro.Get("@gender")), 0);
         p.Gender = genderByte == 0 ? "Macho ♂" : (genderByte == 1 ? "Hembra ♀" : "Sin Género ⚲");
 
-        p.IsShiny = Convert.ToBoolean(Unwrap(ro.Get("@shiny")) ?? false);
         p.IsSuperShiny = Convert.ToBoolean(Unwrap(ro.Get("@super_shiny") ?? ro.Get("@superShiny")) ?? false);
+        p.IsShiny = p.IsSuperShiny || Convert.ToBoolean(Unwrap(ro.Get("@shiny")) ?? false);
         p.Form = SafeGetInt(Unwrap(ro.Get("@form")), 0);
         
         p.PersonalID = SafeGetLong(Unwrap(ro.Get("@personalID") ?? ro.Get("@personal_id") ?? ro.Get("@pid")));
