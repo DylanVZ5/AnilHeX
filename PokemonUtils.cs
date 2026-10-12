@@ -84,4 +84,36 @@ public static class PokemonUtils
 
         return (int)Math.Max(0, exp);
     }
+
+    public static string FixSpeciesCase(string internalSpecies, PBSReader pbs = null)
+    {
+        if (string.IsNullOrWhiteSpace(internalSpecies)) return internalSpecies;
+        string clean = internalSpecies.Replace(":", "").Replace("@", "").Trim();
+        if (clean.Equals("NIDORANmA", StringComparison.OrdinalIgnoreCase)) return "NIDORANmA";
+        if (clean.Equals("NIDORANfE", StringComparison.OrdinalIgnoreCase)) return "NIDORANfE";
+        if (pbs != null && pbs.Species != null)
+        {
+            var match = pbs.Species.Keys.FirstOrDefault(k => k.Equals(clean, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
+        return clean.ToUpper();
+    }
+
+    public static string FixItemCase(string internalItem, PBSReader pbs = null)
+    {
+        if (string.IsNullOrWhiteSpace(internalItem)) return internalItem;
+        string clean = internalItem.Replace(":", "").Replace("@", "").Trim();
+        if (clean.Equals("SCapsula", StringComparison.OrdinalIgnoreCase)) return "SCapsula";
+        if (clean.Equals("ACapsula", StringComparison.OrdinalIgnoreCase)) return "ACapsula";
+        if (clean.Equals("DCapsula", StringComparison.OrdinalIgnoreCase)) return "DCapsula";
+        if (clean.Equals("AECapsula", StringComparison.OrdinalIgnoreCase)) return "AECapsula";
+        if (clean.Equals("DECapsula", StringComparison.OrdinalIgnoreCase)) return "DECapsula";
+        if (clean.Equals("VCapsula", StringComparison.OrdinalIgnoreCase)) return "VCapsula";
+        if (pbs != null && pbs.Items != null)
+        {
+            var match = pbs.Items.Keys.FirstOrDefault(k => k.Equals(clean, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
+        return clean.ToUpper();
+    }
 }

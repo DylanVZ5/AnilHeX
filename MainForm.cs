@@ -589,7 +589,7 @@ public class MainForm : Form
                                (ro.Attributes.ContainsKey("@personal_id") ? ro.Attributes["@personal_id"] : 
                                (ro.Attributes.ContainsKey("@pid") ? ro.Attributes["@pid"] : null));
                 if (pidObj != null && SafeGetLong(Unwrap(pidObj)) == personalId) {
-                    ro.Attributes["@ability"] = newAbilityInternal;
+                    ro.Attributes["@ability"] = new RubySymbol(newAbilityInternal.ToUpper());
                 }
             }
         }
@@ -770,15 +770,23 @@ public class MainForm : Form
                 ro.Attributes["@hp"] = newStats[0]; 
 
                 if (pkm.IsSuperShiny) {
-                    ro.Attributes["@shiny"] = true; ro.Attributes["@radiant"] = true;
-                    ro.Attributes["@radiante"] = true; ro.Attributes["@super_shiny"] = true; ro.Attributes["@superShiny"] = true;
+                    ro.Attributes["@shiny"] = true; 
+                    ro.Attributes["@super_shiny"] = true;
+                    ro.Attributes.Remove("@radiant"); 
+                    ro.Attributes.Remove("@radiante"); 
+                    ro.Attributes.Remove("@superShiny");
                 } else if (pkm.IsShiny) {
                     ro.Attributes["@shiny"] = true;
-                    ro.Attributes.Remove("@radiant"); ro.Attributes.Remove("@radiante");
-                    ro.Attributes.Remove("@super_shiny"); ro.Attributes.Remove("@superShiny");
+                    ro.Attributes["@super_shiny"] = false;
+                    ro.Attributes.Remove("@radiant"); 
+                    ro.Attributes.Remove("@radiante"); 
+                    ro.Attributes.Remove("@superShiny");
                 } else {
-                    ro.Attributes.Remove("@shiny"); ro.Attributes.Remove("@radiant");
-                    ro.Attributes.Remove("@radiante"); ro.Attributes.Remove("@super_shiny"); ro.Attributes.Remove("@superShiny");
+                    ro.Attributes["@shiny"] = false;
+                    ro.Attributes["@super_shiny"] = false;
+                    ro.Attributes.Remove("@radiant"); 
+                    ro.Attributes.Remove("@radiante"); 
+                    ro.Attributes.Remove("@superShiny");
                 }
 
                 ro.Attributes.Remove("@calc_stats");
@@ -974,8 +982,30 @@ public class MainForm : Form
     private void BtnBagAddAll_Click(object sender, EventArgs e) { if (!pbs.IsLoaded) return; lblStatus.Text = "⏳ Inyectando todos los objetos del juego... Esto puede tardar unos segundos."; lblStatus.ForeColor = Color.DarkOrange; this.Cursor = Cursors.WaitCursor; Application.DoEvents(); try { foreach (var kvp in pbs.Items) { string intId = kvp.Key; string realName = pbs.GetName(pbs.Items, intId, kvp.Value); int pkt = pbs.ItemPockets.ContainsKey(intId) ? pbs.ItemPockets[intId] : 1; int targetQty = (pkt == 4 || pkt == 8) ? 1 : 999; bool found = false; foreach (DataGridViewRow row in dgvPockets[pkt].Rows) { if (row.Cells[0].Value != null && row.Cells[0].Value.ToString().Equals(intId, StringComparison.OrdinalIgnoreCase)) { found = true; if (pkt != 4 && pkt != 8) row.Cells[2].Value = targetQty; break; } } if (!found) dgvPockets[pkt].Rows.Add(intId, realName, targetQty); } UpdateBagItemDropdown(); lblStatus.Text = "¡Todos los objetos del juego han sido añadidos a tu mochila!"; lblStatus.ForeColor = Color.Green; } finally { this.Cursor = Cursors.Default; } }
     private void BtnBagRemove_Click(object sender, EventArgs e) { if (tabBagPockets.SelectedIndex < 0) return; int pocket = tabBagPockets.SelectedIndex + 1; if (dgvPockets[pocket].SelectedRows.Count > 0) { foreach (DataGridViewRow row in dgvPockets[pocket].SelectedRows) { if (!row.IsNewRow) dgvPockets[pocket].Rows.Remove(row); } UpdateBagItemDropdown(); } else { MessageBox.Show("Por favor, selecciona primero una fila en la tabla de arriba para borrarla.", "Borrar Objeto", MessageBoxButtons.OK, MessageBoxIcon.Information); } }
 
-    private void ChkShiny_CheckedChanged(object sender, EventArgs e) { if (isUpdatingUI) return; chkShiny.BackColor = chkShiny.Checked ? Color.Gold : SystemColors.Control; if (chkShiny.Checked && chkSuperShiny.Checked) { isUpdatingUI = true; chkSuperShiny.Checked = false; chkSuperShiny.BackColor = SystemColors.Control; isUpdatingUI = false; } ApplyCurrentEdits(); LoadSpriteOnly(); }
-    private void ChkSuperShiny_CheckedChanged(object sender, EventArgs e) { if (isUpdatingUI) return; chkSuperShiny.BackColor = chkSuperShiny.Checked ? Color.Plum : SystemColors.Control; if (chkSuperShiny.Checked && chkShiny.Checked) { isUpdatingUI = true; chkShiny.Checked = false; chkShiny.BackColor = SystemColors.Control; isUpdatingUI = false; } ApplyCurrentEdits(); LoadSpriteOnly(); }
+    private void ChkShiny_CheckedChanged(object sender, EventArgs e) { 
+        if (isUpdatingUI) return; 
+        chkShiny.BackColor = chkShiny.Checked ? Color.Gold : SystemColors.Control; 
+        if (!chkShiny.Checked && chkSuperShiny.Checked) { 
+            isUpdatingUI = true; 
+            chkSuperShiny.Checked = false; 
+            chkSuperShiny.BackColor = SystemColors.Control; 
+            isUpdatingUI = false; 
+        } 
+        ApplyCurrentEdits(); 
+        LoadSpriteOnly(); 
+    }
+    private void ChkSuperShiny_CheckedChanged(object sender, EventArgs e) { 
+        if (isUpdatingUI) return; 
+        chkSuperShiny.BackColor = chkSuperShiny.Checked ? Color.Plum : SystemColors.Control; 
+        if (chkSuperShiny.Checked && !chkShiny.Checked) { 
+            isUpdatingUI = true; 
+            chkShiny.Checked = true; 
+            chkShiny.BackColor = Color.Gold; 
+            isUpdatingUI = false; 
+        } 
+        ApplyCurrentEdits(); 
+        LoadSpriteOnly(); 
+    }
     private void BtnDescAbility_Click(object sender, EventArgs e) { string internalId = PokemonUtils.GetInternalId(pbs.Abilities, cbAbility.Text, "", pbs); string desc = pbs.AbilityDescriptions.TryGetValue(internalId, out string d) ? d : "Sin descripción disponible."; MessageBox.Show(desc, $"Habilidad: {cbAbility.Text}", MessageBoxButtons.OK, MessageBoxIcon.Information); }
     private void BtnMaxHappiness_Click(object sender, EventArgs e) { Pokemon p = GetCurrentPokemon(); if (p != null) { p.Happiness = 255; lblStatus.Text = $"¡Felicidad de {p.Nickname} al máximo (255)!"; lblStatus.ForeColor = Color.DeepPink; } }
     private void BtnDescMoves_Click(int idx) { string internalId = PokemonUtils.GetInternalId(pbs.Moves, cbMoves[idx].Text, "", pbs); string desc = pbs.MoveDescriptions.TryGetValue(internalId, out string d) ? d : "Sin descripción disponible."; MessageBox.Show(desc, $"Movimiento: {cbMoves[idx].Text}", MessageBoxButtons.OK, MessageBoxIcon.Information); }
@@ -993,7 +1023,7 @@ public class MainForm : Form
             p.Exp = PokemonUtils.CalculateExp(p.Level, gr); 
             p.IsShiny = chkShiny.Checked; 
             p.IsSuperShiny = chkSuperShiny.Checked; 
-            if (p.IsSuperShiny) p.IsShiny = false; // Exclusividad visual interna
+            if (p.IsSuperShiny) p.IsShiny = true; // Radiante siempre implica Shiny
 
             p.Gender = cbGender.Text; 
             p.HeldItem = cbItem.Text; 
@@ -1060,9 +1090,9 @@ public class MainForm : Form
         numLevel.Value = Math.Min(100, Math.Max(1, p.Level)); 
         
         if (p.IsSuperShiny) {
-            p.IsShiny = false; 
+            p.IsShiny = true; 
             chkSuperShiny.Checked = true;
-            chkShiny.Checked = false;
+            chkShiny.Checked = true;
         } else {
             chkSuperShiny.Checked = false;
             chkShiny.Checked = p.IsShiny;
@@ -1367,9 +1397,12 @@ public class MainForm : Form
             if (pkmObjs.Count == 0) pkmObjs = FindAllObjectsByClassName(currentSaveData.RootData, "Pokemon");
             foreach (dynamic ro in pkmObjs) {
                 if (ro.Attributes != null && ro.Attributes.ContainsKey("@ability")) {
-                    string abStr = Unwrap(ro.Attributes["@ability"])?.ToString() ?? "";
+                    object abRaw = Unwrap(ro.Attributes["@ability"]);
+                    string abStr = abRaw?.ToString() ?? "";
                     if (abStr.Contains("Desconocid") || string.IsNullOrWhiteSpace(abStr) || abStr.StartsWith("AUTO") || abStr.StartsWith("Auto:")) {
                         ro.Attributes.Remove("@ability"); 
+                    } else if (abRaw is string abStrVal) {
+                        ro.Attributes["@ability"] = new RubySymbol(abStrVal.ToUpper());
                     }
                 }
             }
